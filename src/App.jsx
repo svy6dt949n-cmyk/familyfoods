@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect } from "react";
 
 const SUPA_URL = "https://oamiquozbzmtexfceeej.supabase.co";
 const SUPA_KEY = "sb_publishable_5Rd1aC7uv8nmzM5WaJCRuw_QSRhqjK8";
@@ -181,10 +181,13 @@ export default function App(){
     }catch(e){showToast(t("エラーが発生しました","오류 발생"),"error");}
   }
 
+  const [submitting,setSubmitting]=useState(false);
   async function submitRequest({empId,type,date,note,half}){
+    if(submitting) return;
     if(!date){showToast(t("日付を選択","날짜 선택"),"error");return;}
     if(isOff(date)){showToast(t("公休日・日曜は申請不可","공휴일·일요일 신청 불가"),"error");return;}
     if(requests.find(r=>r.emp_id===empId&&r.date===date)){showToast(t("既に申請済み","이미 신청함"),"error");return;}
+    setSubmitting(true);
     if(type==="選択休暇"){
       const dow=new Date(date).getDay();
       // 직원은 월(1)/수(3)/토(6)만 신청 가능
@@ -197,6 +200,7 @@ export default function App(){
       setRequests(p=>[...p,...res]);
       showToast(t("申請しました！","신청 완료!"));
     }catch(e){showToast(t("エラーが発生しました","오류 발생"),"error");}
+    finally{setSubmitting(false);}
   }
 
   async function approve(id){
@@ -908,6 +912,7 @@ function AdminDirectForm({t,lang,employees,onConfirm,onClose}){
   const [type,setType]=useState("選択休暇");
   const [half,setHalf]=useState(false);
   const [note,setNote]=useState("");
+  const [loading,setLoading]=useState(false);
   return (
     <div>
       <div style={S.fg}>
@@ -946,9 +951,15 @@ function AdminDirectForm({t,lang,employees,onConfirm,onClose}){
           placeholder={t("管理者指定","관리자 지정")}/>
       </div>
       <div style={{display:"flex",gap:8,marginTop:8}}>
-        <button style={{...S.primaryBtn,flex:1,background:"linear-gradient(135deg,#059669,#10b981)"}}
-          onClick={()=>onConfirm(empId,type,half,note)}>
-          ✓ {t("即時確定","즉시 확정")}
+        <button style={{...S.primaryBtn,flex:1,background:loading?"#9ca3af":"linear-gradient(135deg,#059669,#10b981)",
+          opacity:loading?0.7:1,cursor:loading?"not-allowed":"pointer"}}
+          onClick={async()=>{
+            if(loading) return;
+            setLoading(true);
+            await onConfirm(empId,type,half,note);
+            setLoading(false);
+          }}>
+          {loading?t("処理中...","처리 중..."):"✓ "+t("即時確定","즉시 확정")}
         </button>
         <button style={S.closeBtn} onClick={onClose}>{t("キャンセル","취소")}</button>
       </div>
@@ -1217,9 +1228,12 @@ function AdminSchedModal({t,lang,emp,requests,onAdd,onDelete,onClose}){
           <input style={{...S.input,marginBottom:8}} value={note}
             onChange={e=>setNote(e.target.value)} placeholder={t("備考（任意）","비고（선택）")}/>
           <button style={{...S.primaryBtn,width:"100%",padding:"8px"}}
-            onClick={()=>{
+            onClick={async()=>{
               if(!date){alert(t("日付を選択してください","날짜를 선택하세요"));return;}
-              onAdd({emp_id:emp.id,type,date,note,half});
+              const btn=document.activeElement;
+              if(btn) btn.disabled=true;
+              await onAdd({emp_id:emp.id,type,date,note,half});
+              if(btn) btn.disabled=false;
             }}>
             {t("登録する","등록하기")}
           </button>
@@ -1529,4 +1543,5 @@ const S={
   code:{fontSize:11,background:"#e2e8f0",padding:"1px 6px",borderRadius:4,fontFamily:"monospace"},
   empty:{color:"#9ca3af",textAlign:"center",padding:"20px 0",fontSize:13},
 };
+
 
