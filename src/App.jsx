@@ -186,9 +186,10 @@ export default function App(){
     if(isOff(date)){showToast(t("公休日・日曜は申請不可","공휴일·일요일 신청 불가"),"error");return;}
     if(requests.find(r=>r.emp_id===empId&&r.date===date)){showToast(t("既に申請済み","이미 신청함"),"error");return;}
     if(type==="選択休暇"){
-      const emp=employees.find(e=>e.id===empId);
-      if(emp&&new Date(date).getDay()!==DAYOFF_NUM[emp.selected_day_off]){
-        showToast(t("選択休暇は担当曜日のみ","선택휴무는 담당 요일만"),"error");return;
+      const dow=new Date(date).getDay();
+      // 직원은 월(1)/수(3)/토(6)만 신청 가능
+      if(![1,3,6].includes(dow)){
+        showToast(t("選択休暇は月・水・土のみ申請可能です","선택휴무는 월·수·토만 신청 가능합니다"),"error");return;
       }
     }
     try{
@@ -608,6 +609,7 @@ function AdminView({lang,t,employees,allAccounts,requests,year,month,prevMonth,n
   const [tab,setTab]=useState("calendar");
   const [filter,setFilter]=useState("all");
   const [dayModal,setDayModal]=useState(null);
+  const [adminAddModal,setAdminAddModal]=useState(null); // {date} 관리자 직접 지정
   const statusColor={approved:"#10b981",pending:"#f59e0b",rejected:"#ef4444"};
   const statusLabel={approved:t("承認済","승인"),pending:t("審査中","심사중"),rejected:t("却下","반려")};
   const empOnly=employees.filter(e=>e.role==="employee");
@@ -851,10 +853,105 @@ function AdminView({lang,t,employees,allAccounts,requests,year,month,prevMonth,n
                 </div>
               );
             })}
-            <button style={{...S.closeBtn,marginTop:12}} onClick={()=>setDayModal(null)}>{t("閉じる","닫기")}</button>
+            {/* 관리자 직접 지정 버튼 */}
+            <div style={{borderTop:"1px solid #e2e8f0",marginTop:12,paddingTop:12}}>
+              <button style={{...S.primaryBtn,width:"100%",background:"linear-gradient(135deg,#059669,#10b981)",marginBottom:8}}
+                onClick={()=>{setDayModal(null);setAdminAddModal({date:dayModal.date});}}>
+                📅 {t("この日に直接指定する","이 날짜에 직접 지정하기")}
+              </button>
+            </div>
+            <button style={{...S.closeBtn,width:"100%",textAlign:"center"}} onClick={()=>setDayModal(null)}>{t("閉じる","닫기")}</button>
           </div>
         </div>
       )}
+
+      {/* 관리자 직접 선택휴무/유급 지정 모달 */}
+      {adminAddModal&&(
+        <div style={S.overlay} onClick={()=>setAdminAddModal(null)}>
+          <div style={{...S.modalBox,maxWidth:420}} onClick={e=>e.stopPropagation()}>
+            <h3 style={S.modalTitle}>📅 {t("管理者として直接指定","관리자 직접 지정")}</h3>
+            <div style={{background:"#f0fdf4",borderRadius:10,padding:"10px 14px",marginBottom:16,
+              fontSize:13,color:"#166534",fontWeight:700}}>
+              {adminAddModal.date} ({["日","月","火","水","木","金","土"][new Date(adminAddModal.date).getDay()]}曜日)
+            </div>
+            <AdminDirectForm
+              t={t} lang={lang} employees={empOnly}
+              onConfirm={async(empId,type,half,note)=>{
+                try{
+                  await db.addRequest({emp_id:empId,type,date:adminAddModal.date,
+                    status:"approved",note:note||t("管理者指定","관리자 지정"),half:!!half});
+                  if(type==="有給休暇"){
+                    const emp=employees.find(e=>e.id===empId);
+                    const dec=half?0.5:1;
+                    const newLeave=Math.max(0,(emp?.remaining_paid_leave||0)-dec);
+                    await db.updateEmployee(empId,{remaining_paid_leave:newLeave});
+                  }
+                  await loadData(false);
+                  setAdminAddModal(null);
+                  showToast(t("直接指定しました","직접 지정 완료"));
+                }catch(e){showToast("エラー: "+e.message,"error");}
+              }}
+              onClose={()=>setAdminAddModal(null)}
+            />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════
+// 관리자 직접 지정 폼
+// ══════════════════════════════════════════════════════════════════
+function AdminDirectForm({t,lang,employees,onConfirm,onClose}){
+  const [empId,setEmpId]=useState(employees[0]?.id||"");
+  const [type,setType]=useState("選択休暇");
+  const [half,setHalf]=useState(false);
+  const [note,setNote]=useState("");
+  return (
+    <div>
+      <div style={S.fg}>
+        <label style={S.fl}>{t("社員を選択","직원 선택")}</label>
+        <select style={S.input} value={empId} onChange={e=>setEmpId(+e.target.value)}>
+          {employees.map(e=><option key={e.id} value={e.id}>{lang==="ja"?e.name:e.name_ko}</option>)}
+        </select>
+      </div>
+      <div style={S.fg}>
+        <label style={S.fl}>{t("種別","종류")}</label>
+        <div style={{display:"flex",gap:8}}>
+          {[
+            {val:"選択休暇",bg:COLOR.sentaku.bg,tc:COLOR.sentaku.text,label:t("選択休暇","선택휴무")},
+            {val:"有給休暇",bg:COLOR.yukyu.bg,tc:COLOR.yukyu.text,label:t("有給休暇","유급휴가")},
+          ].map(o=>(
+            <button key={o.val} onClick={()=>setType(o.val)}
+              style={{flex:1,padding:"8px",border:`2px solid ${type===o.val?o.tc:"#e2e8f0"}`,
+                borderRadius:8,background:type===o.val?o.bg:"#f8fafc",
+                color:type===o.val?o.tc:"#6b7280",fontWeight:700,fontSize:13,cursor:"pointer"}}>
+              {o.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      {type==="有給休暇"&&(
+        <div style={S.fg}>
+          <label style={{display:"flex",alignItems:"center",gap:8,fontSize:13,cursor:"pointer"}}>
+            <input type="checkbox" checked={half} onChange={e=>setHalf(e.target.checked)}/>
+            {t("半休","반차")}
+          </label>
+        </div>
+      )}
+      <div style={S.fg}>
+        <label style={S.fl}>{t("備考","비고")}</label>
+        <input style={S.input} value={note} onChange={e=>setNote(e.target.value)}
+          placeholder={t("管理者指定","관리자 지정")}/>
+      </div>
+      <div style={{display:"flex",gap:8,marginTop:8}}>
+        <button style={{...S.primaryBtn,flex:1,background:"linear-gradient(135deg,#059669,#10b981)"}}
+          onClick={()=>onConfirm(empId,type,half,note)}>
+          ✓ {t("即時確定","즉시 확정")}
+        </button>
+        <button style={S.closeBtn} onClick={onClose}>{t("キャンセル","취소")}</button>
+      </div>
     </div>
   );
 }
@@ -1169,8 +1266,8 @@ function ReqModal({t,initDate,empId,selectedDayOff,onSubmit,onClose}){
   const [note,setNote]=useState("");
   const [half,setHalf]=useState(false);
 
-  // 선택휴무 요일 안내
-  const dayOffLabel={月:"月曜日",水:"水曜日",土:"土曜日"}[selectedDayOff]||"";
+  // 선택휴무: 직원은 월/수/토 중 선택
+  const dayOffLabel="月・水・土";
 
   return (
     <div style={S.overlay} onClick={onClose}>
@@ -1432,4 +1529,5 @@ const S={
   code:{fontSize:11,background:"#e2e8f0",padding:"1px 6px",borderRadius:4,fontFamily:"monospace"},
   empty:{color:"#9ca3af",textAlign:"center",padding:"20px 0",fontSize:13},
 };
+
 
