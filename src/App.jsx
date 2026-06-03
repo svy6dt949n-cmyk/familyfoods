@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect } from "react";import { useState, useCallback, useEffect } from "react";
 
 const SUPA_URL = "https://oamiquozbzmtexfceeej.supabase.co";
 const SUPA_KEY = "sb_publishable_5Rd1aC7uv8nmzM5WaJCRuw_QSRhqjK8";
@@ -313,7 +313,7 @@ export default function App(){
               ? <AdminView {...shared} allAccounts={employees}
                   addEmployee={addEmployee} updateEmployee={updateEmployee}
                   deleteEmployee={deleteEmployee} resetPassword={resetPassword}/>
-              : <EmployeeView {...shared} currentUser={currentEmp}
+                  deleteEmployee={deleteEmployee} resetPassword={resetPassword} loadData={loadData}/>
                   onChangePassword={(pw)=>changePassword(currentEmp.id,pw)}/>
             }
           </main>
@@ -605,7 +605,7 @@ function EmployeeView({lang,t,currentUser,requests,year,month,prevMonth,nextMont
 // ══════════════════════════════════════════════════════════════════
 function AdminView({lang,t,employees,allAccounts,requests,year,month,prevMonth,nextMonth,
   daysInMonth,firstDay,dayLabels,warn,getApproved,getAllForDate,approve,reject,
-  downloadCSV,pendingList,addEmployee,updateEmployee,deleteEmployee,resetPassword}){
+  downloadCSV,pendingList,addEmployee,updateEmployee,deleteEmployee,resetPassword,loadData}){
   const [tab,setTab]=useState("calendar");
   const [filter,setFilter]=useState("all");
   const [dayModal,setDayModal]=useState(null);
@@ -739,14 +739,14 @@ function AdminView({lang,t,employees,allAccounts,requests,year,month,prevMonth,n
             requests={requests} approve={approve} reject={reject}
             onAddAdminRequest={async(r)=>{
               try{
-                const res=await db.addRequest({...r,status:"approved"});
+                await db.addRequest({...r,status:"approved"});
                 if(r.type==="有給休暇"){
                   const emp=employees.find(e=>e.id===r.emp_id);
                   const dec=r.half?0.5:1;
                   const newLeave=Math.max(0,(emp?.remaining_paid_leave||0)-dec);
                   await db.updateEmployee(r.emp_id,{remaining_paid_leave:newLeave});
                 }
-                await loadData(false);
+                window.location.reload();
               }catch(e){alert("エラー: "+e.message);}
             }}
             onDeleteRequest={async(id,req)=>{
@@ -757,13 +757,13 @@ function AdminView({lang,t,employees,allAccounts,requests,year,month,prevMonth,n
                   const newLeave=(emp?.remaining_paid_leave||0)+(req.half?0.5:1);
                   await db.updateEmployee(req.emp_id,{remaining_paid_leave:newLeave});
                 }
-                await loadData(false);
+                window.location.reload();
               }catch(e){alert("エラー: "+e.message);}
             }}
             onUpdateLeave={async(empId,newLeave)=>{
               try{
                 await db.updateEmployee(empId,{remaining_paid_leave:Number(newLeave)});
-                await loadData(false);
+                window.location.reload();
               }catch(e){alert("エラー: "+e.message);}
             }}
           />
@@ -886,7 +886,7 @@ function AdminView({lang,t,employees,allAccounts,requests,year,month,prevMonth,n
                     const newLeave=Math.max(0,(emp?.remaining_paid_leave||0)-dec);
                     await db.updateEmployee(empId,{remaining_paid_leave:newLeave});
                   }
-                  await loadData(false);
+                  window.location.reload();
                   setAdminAddModal(null);
                   showToast(t("直接指定しました","직접 지정 완료"));
                 }catch(e){showToast("エラー: "+e.message,"error");}
