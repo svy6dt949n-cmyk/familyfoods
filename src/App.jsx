@@ -691,11 +691,13 @@ function AdminView({lang,t,employees,allAccounts,requests,year,month,prevMonth,n
                   {appr.map(r=>{
                     const emp=employees.find(a=>a.id===r.emp_id);
                     const cs=getChipStyle(r);
-                    const empName=(lang==="ja"?emp?.name:emp?.name_ko)?.replace(/　/g," ").trim()||"";
+                    // 이름에서 공백/전각공백 정리 후 표시
+                    const rawName=(lang==="ja"?emp?.name:emp?.name_ko)||"";
+                    const dispName=rawName.replace(/[　\s]+/g," ").trim();
                     return (
                       <div key={r.id} style={{...S.chip,background:cs.bg,color:cs.text,
                         border:`1px solid ${cs.bg}`,fontSize:10,marginTop:2}}>
-                        {empName}{r.half?t("半","반"):""}
+                        {dispName}{r.half?t("半","반"):""}
                       </div>
                     );
                   })}
