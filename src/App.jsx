@@ -686,11 +686,11 @@ function AdminView({lang,t,employees,allAccounts,requests,year,month,prevMonth,n
                   {appr.map(r=>{
                     const emp=employees.find(a=>a.id===r.emp_id);
                     const cs=getChipStyle(r);
-                    const firstName=(lang==="ja"?emp?.name:emp?.name_ko)?.split(" ")[0]||"";
+                    const empName=(lang==="ja"?emp?.name:emp?.name_ko)?.replace(/　/g," ").trim()||"";
                     return (
                       <div key={r.id} style={{...S.chip,background:cs.bg,color:cs.text,
                         border:`1px solid ${cs.bg}`,fontSize:10,marginTop:2}}>
-                        {emp?.avatar} {firstName}{r.half?t("半","반"):""}
+                        {empName}{r.half?t("半","반"):""}
                       </div>
                     );
                   })}
@@ -1543,6 +1543,4 @@ const S={
   code:{fontSize:11,background:"#e2e8f0",padding:"1px 6px",borderRadius:4,fontFamily:"monospace"},
   empty:{color:"#9ca3af",textAlign:"center",padding:"20px 0",fontSize:13},
 };
-
-
 
