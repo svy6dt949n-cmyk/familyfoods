@@ -57,6 +57,7 @@ const COLOR = {
   sentaku: { bg:"#d1fae5", text:"#065f46", border:"#6ee7b7", label:"選択休暇", labelKo:"선택휴무" },
   yukyu:   { bg:"#dbeafe", text:"#1e40af", border:"#93c5fd", label:"有給休暇", labelKo:"유급휴가" },
   half:    { bg:"#e0e7ff", text:"#3730a3", border:"#a5b4fc", label:"半休",     labelKo:"반차" },
+  daitai:  { bg:"#fce7f3", text:"#9d174d", border:"#f9a8d4", label:"代替休暇", labelKo:"대체휴가" },
 };
 
 function fmt(y,m,d){return `${y}-${String(m+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;}
@@ -352,6 +353,7 @@ function getChipStyle(req){
   if(req.status==="pending") return {bg:"#fef3c7",text:"#92400e"};
   if(req.status==="rejected") return {bg:"#fee2e2",text:"#991b1b"};
   if(req.type==="選択休暇") return {bg:COLOR.sentaku.bg,text:COLOR.sentaku.text};
+  if(req.type==="代替休暇") return {bg:COLOR.daitai.bg,text:COLOR.daitai.text};
   if(req.half) return {bg:COLOR.half.bg,text:COLOR.half.text};
   return {bg:COLOR.yukyu.bg,text:COLOR.yukyu.text};
 }
@@ -614,6 +616,7 @@ function AdminView({lang,t,employees,allAccounts,requests,year,month,prevMonth,n
   const [filter,setFilter]=useState("all");
   const [dayModal,setDayModal]=useState(null);
   const [adminAddModal,setAdminAddModal]=useState(null); // {date} 관리자 직접 지정
+  const [editReqModal,setEditReqModal]=useState(null); // 기존 신청 변경
   const statusColor={approved:"#10b981",pending:"#f59e0b",rejected:"#ef4444"};
   const statusLabel={approved:t("承認済","승인"),pending:t("審査中","심사중"),rejected:t("却下","반려")};
   const empOnly=employees.filter(e=>e.role==="employee");
@@ -651,6 +654,7 @@ function AdminView({lang,t,employees,allAccounts,requests,year,month,prevMonth,n
               {bg:COLOR.sentaku.bg,tc:COLOR.sentaku.text,label:t("選択休暇","선택휴무")},
               {bg:COLOR.yukyu.bg,tc:COLOR.yukyu.text,label:t("有給休暇","유급휴가")},
               {bg:COLOR.half.bg,tc:COLOR.half.text,label:t("半休","반차")},
+              {bg:COLOR.daitai.bg,tc:COLOR.daitai.text,label:t("代替休暇","대체휴가")},
               {bg:"#fef3c7",tc:"#92400e",label:t("⏳ 審査中","⏳ 심사중")},
               {bg:"#fffbeb",tc:"#92400e",label:t("⚠️ 人員不足","⚠️ 인원부족")},
             ].map(({bg,tc,label})=>(
@@ -848,12 +852,16 @@ function AdminView({lang,t,employees,allAccounts,requests,year,month,prevMonth,n
                       {r.status==="approved"?t("承認済","승인"):r.status==="pending"?t("審査中","심사중"):t("却下","반려")}
                     </span>
                   </div>
-                  {r.status==="pending"&&(
-                    <div style={{display:"flex",gap:6,marginTop:8}}>
-                      <button style={S.approveBtn} onClick={()=>{approve(r.id);setDayModal(null);}}>✓</button>
-                      <button style={S.rejectBtn} onClick={()=>{reject(r.id);setDayModal(null);}}>✕</button>
-                    </div>
-                  )}
+                  <div style={{display:"flex",gap:6,marginTop:8,flexWrap:"wrap"}}>
+                    {r.status==="pending"&&<>
+                      <button style={S.approveBtn} onClick={()=>{approve(r.id);setDayModal(null);}}>✓ {t("承認","승인")}</button>
+                      <button style={S.rejectBtn} onClick={()=>{reject(r.id);setDayModal(null);}}>✕ {t("却下","반려")}</button>
+                    </>}
+                    <button style={{...S.editBtn,background:"#fef9c3",color:"#854d0e"}}
+                      onClick={()=>{setEditReqModal(r);setDayModal(null);}}>
+                      ✏️ {t("変更","변경")}
+                    </button>
+                  </div>
                 </div>
               );
             })}
@@ -900,6 +908,96 @@ function AdminView({lang,t,employees,allAccounts,requests,year,month,prevMonth,n
           </div>
         </div>
       )}
+      {/* 기존 신청 변경 모달 */}
+      {editReqModal&&(
+        <div style={S.overlay} onClick={()=>setEditReqModal(null)}>
+          <div style={{...S.modalBox,maxWidth:420}} onClick={e=>e.stopPropagation()}>
+            <h3 style={S.modalTitle}>✏️ {t("休暇を変更","휴가 변경")}</h3>
+            <EditReqForm
+              t={t} req={editReqModal}
+              employees={employees}
+              onSave={async(newType,newDate,newHalf)=>{
+                try{
+                  // 기존 유급이면 복원
+                  if(editReqModal.status==="approved"&&editReqModal.type==="有給休暇"){
+                    const emp=employees.find(e=>e.id===editReqModal.emp_id);
+                    const restore=(editReqModal.half?0.5:1);
+                    await db.updateEmployee(editReqModal.emp_id,{remaining_paid_leave:(emp?.remaining_paid_leave||0)+restore});
+                  }
+                  // 새로 저장
+                  await db.updateRequest(editReqModal.id,{type:newType,date:newDate,half:newHalf});
+                  // 새 유급이면 차감
+                  if(editReqModal.status==="approved"&&newType==="有給休暇"){
+                    const emp=employees.find(e=>e.id===editReqModal.emp_id);
+                    const dec=newHalf?0.5:1;
+                    await db.updateEmployee(editReqModal.emp_id,{remaining_paid_leave:Math.max(0,(emp?.remaining_paid_leave||0)-dec)});
+                  }
+                  window.location.reload();
+                }catch(e){showToast("エラー: "+e.message,"error");}
+              }}
+              onClose={()=>setEditReqModal(null)}
+            />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════
+// 신청 변경 폼
+// ══════════════════════════════════════════════════════════════════
+function EditReqForm({t,req,employees,onSave,onClose}){
+  const emp=employees.find(e=>e.id===req.emp_id);
+  const [type,setType]=useState(req.type);
+  const [date,setDate]=useState(req.date);
+  const [half,setHalf]=useState(req.half||false);
+  return (
+    <div>
+      {/* 직원 정보 */}
+      <div style={{background:"#f8fafc",borderRadius:10,padding:"10px 14px",marginBottom:16,
+        display:"flex",alignItems:"center",gap:10}}>
+        <div style={S.smAv}>{emp?.avatar}</div>
+        <div>
+          <div style={{fontWeight:700}}>{emp?.name}</div>
+          <div style={{fontSize:12,color:"#9ca3af"}}>{req.date} → {t("変更後","변경 후")}</div>
+        </div>
+      </div>
+      <div style={S.fg}>
+        <label style={S.fl}>{t("種別","종류")}</label>
+        <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+          {[
+            {val:"選択休暇",bg:COLOR.sentaku.bg,tc:COLOR.sentaku.text,label:t("選択休暇","선택휴무")},
+            {val:"有給休暇",bg:COLOR.yukyu.bg,tc:COLOR.yukyu.text,label:t("有給休暇","유급휴가")},
+            {val:"代替休暇",bg:COLOR.daitai.bg,tc:COLOR.daitai.text,label:t("代替休暇","대체휴가")},
+          ].map(o=>(
+            <button key={o.val} onClick={()=>setType(o.val)}
+              style={{flex:1,padding:"7px 4px",border:`2px solid ${type===o.val?o.tc:"#e2e8f0"}`,
+                borderRadius:8,background:type===o.val?o.bg:"#f8fafc",
+                color:type===o.val?o.tc:"#6b7280",fontWeight:700,fontSize:12,cursor:"pointer"}}>
+              {o.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div style={S.fg}>
+        <label style={S.fl}>{t("日付を変更","날짜 변경")}</label>
+        <input type="date" style={S.input} value={date} onChange={e=>setDate(e.target.value)}/>
+      </div>
+      {type==="有給休暇"&&(
+        <div style={S.fg}>
+          <label style={{display:"flex",alignItems:"center",gap:8,fontSize:13,cursor:"pointer"}}>
+            <input type="checkbox" checked={half} onChange={e=>setHalf(e.target.checked)}/>
+            {t("半休","반차")}
+          </label>
+        </div>
+      )}
+      <div style={{display:"flex",gap:8,marginTop:16}}>
+        <button style={{...S.primaryBtn,flex:1}} onClick={()=>onSave(type,date,half)}>
+          {t("変更を保存","변경 저장")}
+        </button>
+        <button style={S.closeBtn} onClick={onClose}>{t("キャンセル","취소")}</button>
+      </div>
     </div>
   );
 }
@@ -927,6 +1025,7 @@ function AdminDirectForm({t,lang,employees,onConfirm,onClose}){
           {[
             {val:"選択休暇",bg:COLOR.sentaku.bg,tc:COLOR.sentaku.text,label:t("選択休暇","선택휴무")},
             {val:"有給休暇",bg:COLOR.yukyu.bg,tc:COLOR.yukyu.text,label:t("有給休暇","유급휴가")},
+            {val:"代替休暇",bg:COLOR.daitai.bg,tc:COLOR.daitai.text,label:t("代替休暇","대체휴가")},
           ].map(o=>(
             <button key={o.val} onClick={()=>setType(o.val)}
               style={{flex:1,padding:"8px",border:`2px solid ${type===o.val?o.tc:"#e2e8f0"}`,
@@ -1297,6 +1396,8 @@ function ReqModal({t,initDate,empId,selectedDayOff,onSubmit,onClose}){
                label:t(`選択休暇（${dayOffLabel}）`,`선택휴무（${dayOffLabel}）`)},
               {val:"有給休暇",bg:COLOR.yukyu.bg,tc:COLOR.yukyu.text,
                label:t("有給休暇","유급휴가")},
+            {val:"代替休暇",bg:COLOR.daitai.bg,tc:COLOR.daitai.text,
+               label:t("代替休暇","대체휴가")},
             ].map(o=>(
               <button key={o.val} onClick={()=>setType(o.val)}
                 style={{flex:1,padding:"10px 6px",border:`2px solid ${type===o.val?o.tc:"#e2e8f0"}`,
