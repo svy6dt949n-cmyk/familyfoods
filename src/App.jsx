@@ -51,6 +51,7 @@ const DAYOFF_NUM={月:1,水:3,土:6};
 const DEPT_OPTIONS=["営業","開発","デザイン","総務","経理","人事","その他"];
 const LS_LOGIN="ff_login_id";
 const LS_LANG="ff_lang";
+const APP_VER="2.1";
 
 // 색상 정의
 const COLOR = {
@@ -1309,6 +1310,7 @@ function AdminSchedModal({t,lang,emp,requests,onAdd,onDelete,onClose}){
               <select style={S.input} value={type} onChange={e=>setType(e.target.value)}>
                 <option value="選択休暇">{t("選択休暇","선택휴무")}</option>
                 <option value="有給休暇">{t("有給休暇","유급휴가")}</option>
+                <option value="代替休暇">{t("代替休暇","대체휴가")}</option>
               </select>
             </div>
             <div>
@@ -1396,6 +1398,8 @@ function ReqModal({t,initDate,empId,selectedDayOff,onSubmit,onClose}){
                label:t(`選択休暇（${dayOffLabel}）`,`선택휴무（${dayOffLabel}）`)},
               {val:"有給休暇",bg:COLOR.yukyu.bg,tc:COLOR.yukyu.text,
                label:t("有給休暇","유급휴가")},
+              {val:"代替休暇",bg:COLOR.daitai.bg,tc:COLOR.daitai.text,
+               label:t("代替休暇","대체휴가")},
             {val:"代替休暇",bg:COLOR.daitai.bg,tc:COLOR.daitai.text,
                label:t("代替休暇","대체휴가")},
             ].map(o=>(
