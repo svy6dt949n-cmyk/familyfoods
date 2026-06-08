@@ -280,9 +280,18 @@ export default function App(){
   const warn=getWarnings();
   const pendingList=requests.filter(r=>r.status==="pending");
   const dayLabels=lang==="ja"?DAY_LABELS_JP:DAY_LABELS_KO;
-  const getApproved=(ds)=>requests.filter(r=>r.date===ds&&r.status==="approved");
-  const getAllForDate=(ds)=>requests.filter(r=>r.date===ds);
-  const getMyReq=(empId,ds)=>requests.find(r=>r.emp_id===empId&&r.date===ds);
+  // 반려 후 2일 지나면 자동 숨김
+  function isExpiredRejected(r){
+    if(r.status!=="rejected") return false;
+    const created=new Date(r.created_at||r.date);
+    const twoDaysAgo=new Date();
+    twoDaysAgo.setDate(twoDaysAgo.getDate()-2);
+    return created<twoDaysAgo;
+  }
+  const visibleRequests=requests.filter(r=>!isExpiredRejected(r));
+  const getApproved=(ds)=>visibleRequests.filter(r=>r.date===ds&&r.status==="approved");
+  const getAllForDate=(ds)=>visibleRequests.filter(r=>r.date===ds);
+  const getMyReq=(empId,ds)=>visibleRequests.find(r=>r.emp_id===empId&&r.date===ds);
   const currentEmp=loggedIn?.role==="employee"?(employees.find(e=>e.id===loggedIn.id)||loggedIn):loggedIn;
 
   const shared={lang,t,employees,requests,showToast,submitRequest,approve,reject,cancel,downloadCSV,
@@ -576,21 +585,33 @@ function EmployeeView({lang,t,currentUser,requests,year,month,prevMonth,nextMont
                   <div style={{display:"flex",gap:2}}>
                     {isHoliday(ds)&&<span style={S.holTag}>{JP_HOLIDAYS[ds]?.slice(0,2)}</span>}
                     {w&&!isOff(ds)&&<span title={t("人員不足注意","인원부족 주의")} style={{fontSize:12}}>⚠️</span>}
-                    {nearHol&&!w&&<span title={t("連休前後","연휴 전후")} style={{fontSize:10,color:"#f59e0b"}}>★</span>}
+
                   </div>
                 </div>
                 {/* 본인 신청 표시 */}
                 {my&&(()=>{
                   const cs=getChipStyle(my);
                   return (
-                    <div style={{...S.chip,background:cs.bg,color:cs.text,border:`1px solid ${cs.bg}`}}>
-                      {my.type==="選択休暇"?t("選休","선택"):my.half?t("半休","반차"):t("有給","유급")}
+                    <div style={{...S.chip,background:cs.bg,color:cs.text,border:`1px solid ${cs.bg}`,fontWeight:800}}>
+                      ★{my.type==="選択休暇"?t("選休","선택"):my.half?t("半休","반차"):t("有給","유급")}
                     </div>
                   );
                 })()}
-                {/* 다른 직원 수 표시 */}
-                {!my&&!isOff(ds)&&appr.length>0&&(
-                  <div style={{...S.chip,background:"#f1f5f9",color:"#64748b"}}>{appr.length}名</div>
+                {/* 다른 직원 이름 표시 */}
+                {appr.filter(r=>r.emp_id!==currentUser.id).slice(0,2).map(r=>{
+                  const emp=employees.find(a=>a.id===r.emp_id);
+                  const cs=getChipStyle(r);
+                  const dispName=(lang==="ja"?emp?.name:emp?.name_ko)||"";
+                  return (
+                    <div key={r.id} style={{...S.chip,background:cs.bg,color:cs.text,fontSize:9,marginTop:2}}>
+                      {dispName.replace(/　/g," ").trim()}{r.half?t("半","반"):""}
+                    </div>
+                  );
+                })}
+                {appr.filter(r=>r.emp_id!==currentUser.id).length>2&&(
+                  <div style={{...S.chip,background:"#f1f5f9",color:"#475569",fontSize:9,marginTop:2,fontWeight:700}}>
+                    {t("他","외")+String(appr.filter(r=>r.emp_id!==currentUser.id).length-2)+t("名","명")}
+                  </div>
                 )}
               </div>
             );
@@ -676,7 +697,7 @@ function AdminView({lang,t,employees,allAccounts,requests,year,month,prevMonth,n
               return (
                 <div key={ds} style={{...S.dayCell,...(isOff(ds)?S.dayCellOff:{}),
                   ...(w?{border:"2px solid #f59e0b",background:"#fffbeb"}:{}),
-                  ...(nearHol&&!w?{borderTop:"2px solid #fbbf24"}:{}),
+
                   minHeight:90,cursor:isOff(ds)?"default":"pointer"}}
                   onClick={()=>!isOff(ds)&&setDayModal({date:ds,reqs:all})}>
                   <div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}>
@@ -684,14 +705,12 @@ function AdminView({lang,t,employees,allAccounts,requests,year,month,prevMonth,n
                     <div style={{display:"flex",gap:2,alignItems:"center"}}>
                       {isHoliday(ds)&&<span style={S.holTag}>{JP_HOLIDAYS[ds]?.slice(0,2)}</span>}
                       {w&&<span style={{fontSize:11}}>⚠️</span>}
-                      {nearHol&&!w&&<span style={{fontSize:10,color:"#f59e0b"}}>★</span>}
                     </div>
                   </div>
                   {/* 승인된 직원 이름 표시 */}
-                  {appr.map(r=>{
+                  {appr.slice(0,2).map(r=>{
                     const emp=employees.find(a=>a.id===r.emp_id);
                     const cs=getChipStyle(r);
-                    // 이름에서 공백/전각공백 정리 후 표시
                     const rawName=(lang==="ja"?emp?.name:emp?.name_ko)||"";
                     const dispName=rawName.replace(/[　\s]+/g," ").trim();
                     return (
@@ -701,6 +720,11 @@ function AdminView({lang,t,employees,allAccounts,requests,year,month,prevMonth,n
                       </div>
                     );
                   })}
+                  {appr.length>2&&(
+                    <div style={{...S.chip,background:"#f1f5f9",color:"#475569",fontSize:10,marginTop:2,fontWeight:700}}>
+                      {t(`他${appr.length-2}名`,`외${appr.length-2}명`)}
+                    </div>
+                  )}
                   {pend.length>0&&(
                     <div style={{...S.chip,background:"#fef3c7",color:"#92400e",marginTop:2}}>
                       ⏳{pend.length}{t("名","명")}
@@ -830,12 +854,7 @@ function AdminView({lang,t,employees,allAccounts,requests,year,month,prevMonth,n
         <div style={S.overlay} onClick={()=>setDayModal(null)}>
           <div style={S.modalBox} onClick={e=>e.stopPropagation()}>
             <h3 style={S.modalTitle}>📋 {dayModal.date}</h3>
-            {isNearHoliday(dayModal.date)&&(
-              <div style={{background:"#fef3c7",borderRadius:8,padding:"8px 12px",marginBottom:12,
-                fontSize:12,color:"#92400e"}}>
-                ★ {t("連休前後の日付です","연휴 전후 날짜입니다")}
-              </div>
-            )}
+
             {dayModal.reqs.length===0?<div style={S.empty}>{t("申請なし","신청 없음")}</div>
             :dayModal.reqs.map(r=>{
               const emp=employees.find(a=>a.id===r.emp_id);
@@ -1250,6 +1269,12 @@ function MembersTab({lang,t,employees,addEmployee,updateEmployee,deleteEmployee,
           requests={requests}
           onAdd={(r)=>onAddAdminRequest(r)}
           onDelete={(id,req)=>onDeleteRequest(id,req)}
+          onEdit={async(id,data)=>{
+            try{
+              await db.updateRequest(id,data);
+              window.location.reload();
+            }catch(e){alert("エラー: "+e.message);}
+          }}
           onClose={()=>setSchedModal(null)}/>
       )}
 
@@ -1287,7 +1312,7 @@ function MembersTab({lang,t,employees,addEmployee,updateEmployee,deleteEmployee,
 // ══════════════════════════════════════════════════════════════════
 // 관리자 직접 휴가 등록/삭제 모달
 // ══════════════════════════════════════════════════════════════════
-function AdminSchedModal({t,lang,emp,requests,onAdd,onDelete,onClose}){
+function AdminSchedModal({t,lang,emp,requests,onAdd,onDelete,onEdit,onClose}){
   const [type,setType]=useState("選択休暇");
   const [date,setDate]=useState("");
   const [half,setHalf]=useState(false);
@@ -1359,10 +1384,19 @@ function AdminSchedModal({t,lang,emp,requests,onAdd,onDelete,onClose}){
                 <span style={{fontSize:12,fontWeight:600}}>{r.date}</span>
                 <span style={{...S.pill,background:SC[r.status],fontSize:10}}>{SL[r.status]}</span>
               </div>
-              <button style={{...S.rejectBtn,padding:"4px 10px",fontSize:12}}
-                onClick={()=>onDelete(r.id,r)}>
-                🗑 {t("削除","삭제")}
-              </button>
+              <div style={{display:"flex",gap:4}}>
+                <button style={{...S.editBtn,padding:"4px 8px",fontSize:11}}
+                  onClick={()=>{
+                    const newDate=prompt(t("新しい日付を入力 (例: 2026-07-01)","새 날짜 입력 (예: 2026-07-01)"),r.date);
+                    if(newDate&&newDate!==r.date) onEdit(r.id,{date:newDate});
+                  }}>
+                  ✏ {t("変更","변경")}
+                </button>
+                <button style={{...S.rejectBtn,padding:"4px 8px",fontSize:11}}
+                  onClick={()=>onDelete(r.id,r)}>
+                  🗑 {t("削除","삭제")}
+                </button>
+              </div>
             </div>
           );
         })}
@@ -1650,4 +1684,3 @@ const S={
   code:{fontSize:11,background:"#e2e8f0",padding:"1px 6px",borderRadius:4,fontFamily:"monospace"},
   empty:{color:"#9ca3af",textAlign:"center",padding:"20px 0",fontSize:13},
 };
-
