@@ -86,6 +86,7 @@ export default function App(){
   const [loggedIn,setLoggedIn]=useState(null);
   const [loading,setLoading]=useState(true);
   const [toast,setToast]=useState(null);
+  const [submitting,setSubmitting]=useState(false);
   const [year,setYear]=useState(2026);
   const [month,setMonth]=useState(5);
 
@@ -183,7 +184,6 @@ export default function App(){
     }catch(e){showToast(t("エラーが発生しました","오류 발생"),"error");}
   }
 
-  const [submitting,setSubmitting]=useState(false);
   async function submitRequest({empId,type,date,note,half}){
     if(submitting) return;
     if(!date){showToast(t("日付を選択","날짜 선택"),"error");return;}
@@ -1684,3 +1684,4 @@ const S={
   code:{fontSize:11,background:"#e2e8f0",padding:"1px 6px",borderRadius:4,fontFamily:"monospace"},
   empty:{color:"#9ca3af",textAlign:"center",padding:"20px 0",fontSize:13},
 };
+
