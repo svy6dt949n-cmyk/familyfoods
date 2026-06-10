@@ -328,7 +328,6 @@ export default function App(){
               ? <AdminView {...shared} allAccounts={employees}
                   addEmployee={addEmployee} updateEmployee={updateEmployee}
                   deleteEmployee={deleteEmployee} resetPassword={resetPassword}/>
-                  deleteEmployee={deleteEmployee} resetPassword={resetPassword} loadData={loadData}/>
                   onChangePassword={(pw)=>changePassword(currentEmp.id,pw)}/>
             }
           </main>
@@ -1684,4 +1683,3 @@ const S={
   code:{fontSize:11,background:"#e2e8f0",padding:"1px 6px",borderRadius:4,fontFamily:"monospace"},
   empty:{color:"#9ca3af",textAlign:"center",padding:"20px 0",fontSize:13},
 };
-
