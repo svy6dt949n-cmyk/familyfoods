@@ -883,6 +883,21 @@ function AdminView({lang,t,employees,allAccounts,requests,year,month,prevMonth,n
                       onClick={()=>{setEditReqModal(r);setDayModal(null);}}>
                       ✏️ {t("変更","변경")}
                     </button>
+                    <button style={S.rejectBtn}
+                      onClick={async()=>{
+                        if(!window.confirm(t("本当に削除しますか？","정말 삭제할까요?"))) return;
+                        try{
+                          await db.deleteRequest(r.id);
+                          if(r.status==="approved"&&r.type==="有給休暇"){
+                            const emp=employees.find(e=>e.id===r.emp_id);
+                            const newLeave=(emp?.remaining_paid_leave||0)+(r.half?0.5:1);
+                            await db.updateEmployee(r.emp_id,{remaining_paid_leave:newLeave});
+                          }
+                          window.location.reload();
+                        }catch(e){alert("エラー: "+e.message);}
+                      }}>
+                      🗑 {t("削除","삭제")}
+                    </button>
                   </div>
                 </div>
               );
