@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect } from "react";
 
-const SUPA_URL = "https://oamiquozbzmtexfceeej.supabase.co";
-const SUPA_KEY = "sb_publishable_5Rd1aC7uv8nmzM5WaJCRuw_QSRhqjK8";
+const SUPA_URL = import.meta.env.VITE_SUPABASE_URL;
+const SUPA_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
 async function sbFetch(path, options={}) {
   const res = await fetch(`${SUPA_URL}/rest/v1${path}`, {
@@ -484,7 +484,7 @@ function Header({lang,setLang,t,user,onLogout}){
 // ══════════════════════════════════════════════════════════════════
 // EMPLOYEE VIEW
 // ══════════════════════════════════════════════════════════════════
-function EmployeeView({lang,t,currentUser,requests,year,month,prevMonth,nextMonth,
+function EmployeeView({lang,t,currentUser,employees,requests,year,month,prevMonth,nextMonth,
   daysInMonth,firstDay,dayLabels,warn,getApproved,getMyReq,submitRequest,cancel,onChangePassword}){
   const [modal,setModal]=useState(null);
   const [showChgPw,setShowChgPw]=useState(false);
