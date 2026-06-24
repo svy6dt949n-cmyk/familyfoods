@@ -1,12 +1,7 @@
-import { useState } from "react";
+import { useState, useCallback, useEffect } from "react";
 import QRScan from "./QRScan";
 import MainMenu from "./MainMenu";
 
-<<<<<<< HEAD
-export default function App() {
-  const [page, setPage] = useState("menu");
-
-=======
 const SUPA_URL = import.meta.env.VITE_SUPABASE_URL;
 const SUPA_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
@@ -58,7 +53,7 @@ const DAYOFF_NUM={月:1,水:3,土:6};
 const DEPT_OPTIONS=["営業","開発","デザイン","総務","経理","人事","その他"];
 const LS_LOGIN="ff_login_id";
 const LS_LANG="ff_lang";
-const APP_VER="2.1";
+const APP_VER="2.2";
 
 // 색상 정의
 const COLOR = {
@@ -96,6 +91,7 @@ export default function App(){
   const [submitting,setSubmitting]=useState(false);
   const [year,setYear]=useState(2026);
   const [month,setMonth]=useState(5);
+  const [page,setPage]=useState("menu"); // menu | calendar | attendance
 
   const t=useCallback((ja,ko)=>lang==="ja"?ja:ko,[lang]);
   function setLang(l){setLangState(l);try{localStorage.setItem(LS_LANG,l);}catch(e){}}
@@ -126,8 +122,9 @@ export default function App(){
     if(!acc){showToast(t("IDまたはパスワードが違います","ID 또는 비밀번호가 틀립니다"),"error");return;}
     try{localStorage.setItem(LS_LOGIN,acc.login_id);}catch(e){}
     setLoggedIn(acc);
+    setPage("menu");
   }
-  function logout(){try{localStorage.removeItem(LS_LOGIN);}catch(e){}setLoggedIn(null);}
+  function logout(){try{localStorage.removeItem(LS_LOGIN);}catch(e){}setLoggedIn(null);setPage("menu");}
 
   async function changePassword(userId,newPassword){
     try{
@@ -171,7 +168,7 @@ export default function App(){
       await db.updateEmployee(id,u);
       setEmployees(p=>p.map(e=>e.id===id?{...e,...u}:e));
       showToast(t("更新しました","업데이트 완료"));return true;
-    }catch(e){showToast(t("エラーが発생しました","오류 발생"),"error");return false;}
+    }catch(e){showToast(t("エラーが発生しました","오류 발생"),"error");return false;}
   }
 
   async function deleteEmployee(id){
@@ -237,7 +234,7 @@ export default function App(){
       await db.updateRequest(id,{status:"rejected"});
       setRequests(p=>p.map(r=>r.id===id?{...r,status:"rejected"}:r));
       showToast(t("却下しました","반려 완료"),"warn");
-    }catch(e){showToast(t("エラーが発생しました","오류 발생"),"error");}
+    }catch(e){showToast(t("エラーが発生しました","오류 발생"),"error");}
   }
 
   async function cancel(id){
@@ -275,7 +272,6 @@ export default function App(){
       if(isOff(ds)) continue;
       const absent=requests.filter(r=>r.date===ds&&r.status==="approved").length;
       const threshold=Math.ceil(empCount/3);
-      // 1/3 이상 또는 연휴 전후에 2명 이상
       if(absent>=threshold||(isNearHoliday(ds)&&absent>=2)) w.push(ds);
     }
     return w;
@@ -329,15 +325,40 @@ export default function App(){
       )}
       {loggedIn&&!currentEmp?.must_change_password&&(
         <>
-          <Header lang={lang} setLang={setLang} t={t} user={currentEmp} onLogout={logout}/>
+          <Header lang={lang} setLang={setLang} t={t} user={currentEmp} onLogout={logout}
+            page={page} setPage={setPage}/>
           <main style={S.main}>
-            {loggedIn.role==="admin"
-              ? <AdminView {...shared} allAccounts={employees}
-                  addEmployee={addEmployee} updateEmployee={updateEmployee}
-                  deleteEmployee={deleteEmployee} resetPassword={resetPassword}/>
-              : <EmployeeView {...shared} currentUser={currentEmp}
-                  onChangePassword={(pw)=>changePassword(currentEmp.id,pw)}/>
-            }
+            {page==="menu"&&<MainMenu onSelect={setPage}/>}
+
+            {page==="attendance"&&(
+              <div>
+                <button
+                  onClick={()=>setPage("menu")}
+                  style={{ margin: "0 0 16px", padding: "8px 16px", border: "1px solid #D3D1C7", borderRadius: 10, background: "#fff", cursor: "pointer" }}
+                >
+                  ← {t("メニューに戻る","메뉴로 돌아가기")}
+                </button>
+                <QRScan employee={currentEmp}/>
+              </div>
+            )}
+
+            {page==="calendar"&&(
+              <>
+                <button
+                  onClick={()=>setPage("menu")}
+                  style={{ margin: "0 0 16px", padding: "8px 16px", border: "1px solid #D3D1C7", borderRadius: 10, background: "#fff", cursor: "pointer" }}
+                >
+                  ← {t("メニューに戻る","메뉴로 돌아가기")}
+                </button>
+                {loggedIn.role==="admin"
+                  ? <AdminView {...shared} allAccounts={employees}
+                      addEmployee={addEmployee} updateEmployee={updateEmployee}
+                      deleteEmployee={deleteEmployee} resetPassword={resetPassword}/>
+                  : <EmployeeView {...shared} currentUser={currentEmp}
+                      onChangePassword={(pw)=>changePassword(currentEmp.id,pw)}/>
+                }
+              </>
+            )}
           </main>
         </>
       )}
@@ -465,10 +486,10 @@ function ForceChangePw({lang,t,user,onSave,onLogout}){
 // ══════════════════════════════════════════════════════════════════
 // HEADER
 // ══════════════════════════════════════════════════════════════════
-function Header({lang,setLang,t,user,onLogout}){
+function Header({lang,setLang,t,user,onLogout,page,setPage}){
   return (
     <header style={S.header}>
-      <div style={S.logo}>
+      <div style={{...S.logo,cursor:"pointer"}} onClick={()=>setPage&&setPage("menu")}>
         <div style={S.logoIcon}><SmileLogo size={28}/></div>
         <div><FamilyFoodsText size={14}/><div style={S.logoSub}>{t("勤怠管理システム","근태관리 시스템")}</div></div>
       </div>
@@ -592,7 +613,6 @@ function EmployeeView({lang,t,currentUser,employees,requests,year,month,prevMont
                   <div style={{display:"flex",gap:2}}>
                     {isHoliday(ds)&&<span style={S.holTag}>{JP_HOLIDAYS[ds]?.slice(0,2)}</span>}
                     {w&&!isOff(ds)&&<span title={t("人員不足注意","인원부족 주의")} style={{fontSize:12}}>⚠️</span>}
-
                   </div>
                 </div>
                 {/* 본인 신청 표시 */}
@@ -640,12 +660,12 @@ function EmployeeView({lang,t,currentUser,employees,requests,year,month,prevMont
 // ══════════════════════════════════════════════════════════════════
 function AdminView({lang,t,employees,allAccounts,requests,year,month,prevMonth,nextMonth,
   daysInMonth,firstDay,dayLabels,warn,getApproved,getAllForDate,approve,reject,
-  downloadCSV,pendingList,addEmployee,updateEmployee,deleteEmployee,resetPassword,loadData}){
+  downloadCSV,pendingList,addEmployee,updateEmployee,deleteEmployee,resetPassword,loadData,showToast}){
   const [tab,setTab]=useState("calendar");
   const [filter,setFilter]=useState("all");
   const [dayModal,setDayModal]=useState(null);
-  const [adminAddModal,setAdminAddModal]=useState(null); // {date} 관리자 직접 지정
-  const [editReqModal,setEditReqModal]=useState(null); // 기존 신청 변경
+  const [adminAddModal,setAdminAddModal]=useState(null);
+  const [editReqModal,setEditReqModal]=useState(null);
   const statusColor={approved:"#10b981",pending:"#f59e0b",rejected:"#ef4444"};
   const statusLabel={approved:t("承認済","승인"),pending:t("審査中","심사중"),rejected:t("却下","반려")};
   const empOnly=employees.filter(e=>e.role==="employee");
@@ -677,7 +697,6 @@ function AdminView({lang,t,employees,allAccounts,requests,year,month,prevMonth,n
             {warn.map(w=><span key={w} style={S.warnDate}>{w.slice(5)}</span>)}
           </div>)}
 
-          {/* 범례 */}
           <div style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:12}}>
             {[
               {bg:COLOR.sentaku.bg,tc:COLOR.sentaku.text,label:t("選択休暇","선택휴무")},
@@ -704,7 +723,6 @@ function AdminView({lang,t,employees,allAccounts,requests,year,month,prevMonth,n
               return (
                 <div key={ds} style={{...S.dayCell,...(isOff(ds)?S.dayCellOff:{}),
                   ...(w?{border:"2px solid #f59e0b",background:"#fffbeb"}:{}),
-
                   minHeight:90,cursor:isOff(ds)?"default":"pointer"}}
                   onClick={()=>!isOff(ds)&&setDayModal({date:ds,reqs:all})}>
                   <div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}>
@@ -714,7 +732,6 @@ function AdminView({lang,t,employees,allAccounts,requests,year,month,prevMonth,n
                       {w&&<span style={{fontSize:11}}>⚠️</span>}
                     </div>
                   </div>
-                  {/* 승인된 직원 이름 표시 */}
                   {appr.slice(0,2).map(r=>{
                     const emp=employees.find(a=>a.id===r.emp_id);
                     const cs=getChipStyle(r);
@@ -856,7 +873,6 @@ function AdminView({lang,t,employees,allAccounts,requests,year,month,prevMonth,n
         </>)}
       </div>
 
-      {/* 날짜 상세 모달 */}
       {dayModal&&(
         <div style={S.overlay} onClick={()=>setDayModal(null)}>
           <div style={S.modalBox} onClick={e=>e.stopPropagation()}>
@@ -909,7 +925,6 @@ function AdminView({lang,t,employees,allAccounts,requests,year,month,prevMonth,n
                 </div>
               );
             })}
-            {/* 관리자 직접 지정 버튼 */}
             <div style={{borderTop:"1px solid #e2e8f0",marginTop:12,paddingTop:12}}>
               <button style={{...S.primaryBtn,width:"100%",background:"linear-gradient(135deg,#059669,#10b981)",marginBottom:8}}
                 onClick={()=>{setDayModal(null);setAdminAddModal({date:dayModal.date});}}>
@@ -921,7 +936,6 @@ function AdminView({lang,t,employees,allAccounts,requests,year,month,prevMonth,n
         </div>
       )}
 
-      {/* 관리자 직접 선택휴무/유급 지정 모달 */}
       {adminAddModal&&(
         <div style={S.overlay} onClick={()=>setAdminAddModal(null)}>
           <div style={{...S.modalBox,maxWidth:420}} onClick={e=>e.stopPropagation()}>
@@ -944,15 +958,14 @@ function AdminView({lang,t,employees,allAccounts,requests,year,month,prevMonth,n
                   }
                   window.location.reload();
                   setAdminAddModal(null);
-                  showToast(t("直接指定しました","직접 지정 완료"));
-                }catch(e){showToast("エラー: "+e.message,"error");}
+                  showToast&&showToast(t("直接指定しました","직접 지정 완료"));
+                }catch(e){showToast&&showToast("エラー: "+e.message,"error");}
               }}
               onClose={()=>setAdminAddModal(null)}
             />
           </div>
         </div>
       )}
-      {/* 기존 신청 변경 모달 */}
       {editReqModal&&(
         <div style={S.overlay} onClick={()=>setEditReqModal(null)}>
           <div style={{...S.modalBox,maxWidth:420}} onClick={e=>e.stopPropagation()}>
@@ -962,22 +975,19 @@ function AdminView({lang,t,employees,allAccounts,requests,year,month,prevMonth,n
               employees={employees}
               onSave={async(newType,newDate,newHalf)=>{
                 try{
-                  // 기존 유급이면 복원
                   if(editReqModal.status==="approved"&&editReqModal.type==="有給休暇"){
                     const emp=employees.find(e=>e.id===editReqModal.emp_id);
                     const restore=(editReqModal.half?0.5:1);
                     await db.updateEmployee(editReqModal.emp_id,{remaining_paid_leave:(emp?.remaining_paid_leave||0)+restore});
                   }
-                  // 새로 저장
                   await db.updateRequest(editReqModal.id,{type:newType,date:newDate,half:newHalf});
-                  // 새 유급이면 차감
                   if(editReqModal.status==="approved"&&newType==="有給休暇"){
                     const emp=employees.find(e=>e.id===editReqModal.emp_id);
                     const dec=newHalf?0.5:1;
                     await db.updateEmployee(editReqModal.emp_id,{remaining_paid_leave:Math.max(0,(emp?.remaining_paid_leave||0)-dec)});
                   }
                   window.location.reload();
-                }catch(e){showToast("エラー: "+e.message,"error");}
+                }catch(e){showToast&&showToast("エラー: "+e.message,"error");}
               }}
               onClose={()=>setEditReqModal(null)}
             />
@@ -996,34 +1006,704 @@ function EditReqForm({t,req,employees,onSave,onClose}){
   const [type,setType]=useState(req.type);
   const [date,setDate]=useState(req.date);
   const [half,setHalf]=useState(req.half||false);
->>>>>>> daa00167076c77a04e6c612fbca31fe7ea4e2e45
   return (
     <div>
-      {page === "menu" && <MainMenu onSelect={setPage} />}
-
-      {page === "attendance" && (
+      <div style={{background:"#f8fafc",borderRadius:10,padding:"10px 14px",marginBottom:16,
+        display:"flex",alignItems:"center",gap:10}}>
+        <div style={S.smAv}>{emp?.avatar}</div>
         <div>
-          <button
-            onClick={() => setPage("menu")}
-            style={{ margin: 16, padding: "8px 16px", border: "1px solid #D3D1C7", borderRadius: 10, background: "#fff", cursor: "pointer" }}
-          >
-            ← メニューに戻る
-          </button>
-          <QRScan employee={{ id: 1 }} />
+          <div style={{fontWeight:700}}>{emp?.name}</div>
+          <div style={{fontSize:12,color:"#9ca3af"}}>{req.date} → {t("変更後","변경 후")}</div>
+        </div>
+      </div>
+      <div style={S.fg}>
+        <label style={S.fl}>{t("種別","종류")}</label>
+        <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+          {[
+            {val:"選択休暇",bg:COLOR.sentaku.bg,tc:COLOR.sentaku.text,label:t("選択休暇","선택휴무")},
+            {val:"有給休暇",bg:COLOR.yukyu.bg,tc:COLOR.yukyu.text,label:t("有給休暇","유급휴가")},
+            {val:"代替休暇",bg:COLOR.daitai.bg,tc:COLOR.daitai.text,label:t("代替休暇","대체휴가")},
+          ].map(o=>(
+            <button key={o.val} onClick={()=>setType(o.val)}
+              style={{flex:1,padding:"7px 4px",border:`2px solid ${type===o.val?o.tc:"#e2e8f0"}`,
+                borderRadius:8,background:type===o.val?o.bg:"#f8fafc",
+                color:type===o.val?o.tc:"#6b7280",fontWeight:700,fontSize:12,cursor:"pointer"}}>
+              {o.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div style={S.fg}>
+        <label style={S.fl}>{t("日付を変更","날짜 변경")}</label>
+        <input type="date" style={S.input} value={date} onChange={e=>setDate(e.target.value)}/>
+      </div>
+      {type==="有給休暇"&&(
+        <div style={S.fg}>
+          <label style={{display:"flex",alignItems:"center",gap:8,fontSize:13,cursor:"pointer"}}>
+            <input type="checkbox" checked={half} onChange={e=>setHalf(e.target.checked)}/>
+            {t("半休","반차")}
+          </label>
+        </div>
+      )}
+      <div style={{display:"flex",gap:8,marginTop:16}}>
+        <button style={{...S.primaryBtn,flex:1}} onClick={()=>onSave(type,date,half)}>
+          {t("変更を保存","변경 저장")}
+        </button>
+        <button style={S.closeBtn} onClick={onClose}>{t("キャンセル","취소")}</button>
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════
+// 관리자 직접 지정 폼
+// ══════════════════════════════════════════════════════════════════
+function AdminDirectForm({t,lang,employees,onConfirm,onClose}){
+  const [empId,setEmpId]=useState(employees[0]?.id||"");
+  const [type,setType]=useState("選択休暇");
+  const [half,setHalf]=useState(false);
+  const [note,setNote]=useState("");
+  const [loading,setLoading]=useState(false);
+  return (
+    <div>
+      <div style={S.fg}>
+        <label style={S.fl}>{t("社員を選択","직원 선택")}</label>
+        <select style={S.input} value={empId} onChange={e=>setEmpId(+e.target.value)}>
+          {employees.map(e=><option key={e.id} value={e.id}>{lang==="ja"?e.name:e.name_ko}</option>)}
+        </select>
+      </div>
+      <div style={S.fg}>
+        <label style={S.fl}>{t("種別","종류")}</label>
+        <div style={{display:"flex",gap:8}}>
+          {[
+            {val:"選択休暇",bg:COLOR.sentaku.bg,tc:COLOR.sentaku.text,label:t("選択休暇","선택휴무")},
+            {val:"有給休暇",bg:COLOR.yukyu.bg,tc:COLOR.yukyu.text,label:t("有給休暇","유급휴가")},
+            {val:"代替休暇",bg:COLOR.daitai.bg,tc:COLOR.daitai.text,label:t("代替休暇","대체휴가")},
+          ].map(o=>(
+            <button key={o.val} onClick={()=>setType(o.val)}
+              style={{flex:1,padding:"8px",border:`2px solid ${type===o.val?o.tc:"#e2e8f0"}`,
+                borderRadius:8,background:type===o.val?o.bg:"#f8fafc",
+                color:type===o.val?o.tc:"#6b7280",fontWeight:700,fontSize:13,cursor:"pointer"}}>
+              {o.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      {type==="有給休暇"&&(
+        <div style={S.fg}>
+          <label style={{display:"flex",alignItems:"center",gap:8,fontSize:13,cursor:"pointer"}}>
+            <input type="checkbox" checked={half} onChange={e=>setHalf(e.target.checked)}/>
+            {t("半休","반차")}
+          </label>
+        </div>
+      )}
+      <div style={S.fg}>
+        <label style={S.fl}>{t("備考","비고")}</label>
+        <input style={S.input} value={note} onChange={e=>setNote(e.target.value)}
+          placeholder={t("管理者指定","관리자 지정")}/>
+      </div>
+      <div style={{display:"flex",gap:8,marginTop:8}}>
+        <button style={{...S.primaryBtn,flex:1,background:loading?"#9ca3af":"linear-gradient(135deg,#059669,#10b981)",
+          opacity:loading?0.7:1,cursor:loading?"not-allowed":"pointer"}}
+          onClick={async()=>{
+            if(loading) return;
+            setLoading(true);
+            await onConfirm(empId,type,half,note);
+            setLoading(false);
+          }}>
+          {loading?t("処理中...","처리 중..."):"✓ "+t("即時確定","즉시 확정")}
+        </button>
+        <button style={S.closeBtn} onClick={onClose}>{t("キャンセル","취소")}</button>
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════
+// 직원 관리 탭
+// ══════════════════════════════════════════════════════════════════
+function MembersTab({lang,t,employees,addEmployee,updateEmployee,deleteEmployee,resetPassword,
+  requests,onAddAdminRequest,onDeleteRequest,onUpdateLeave}){
+  const EMPTY={name:"",nameKo:"",login_id:"",tempPassword:"temp1234",dept:"営業",selectedDayOff:"月",remainingPaidLeave:20};
+  const [showForm,setShowForm]=useState(false);
+  const [editId,setEditId]=useState(null);
+  const [form,setForm]=useState(EMPTY);
+  const [confirmDel,setConfirmDel]=useState(null);
+  const [resetModal,setResetModal]=useState(null);
+  const [newTempPw,setNewTempPw]=useState("temp1234");
+  const [showPw,setShowPw]=useState(false);
+  const [visiblePwIds,setVisiblePwIds]=useState({});
+  function togglePw(id){setVisiblePwIds(p=>({...p,[id]:!p[id]}));}
+  const [schedModal,setSchedModal]=useState(null);
+  const [leaveModal,setLeaveModal]=useState(null);
+  const [newLeave,setNewLeave]=useState(0);
+  function openAdd(){setForm(EMPTY);setEditId(null);setShowForm(true);}
+  function openEdit(emp){
+    setForm({name:emp.name,nameKo:emp.name_ko,login_id:emp.login_id,tempPassword:emp.password,
+      dept:emp.dept,selectedDayOff:emp.selected_day_off,remainingPaidLeave:emp.remaining_paid_leave});
+    setEditId(emp.id);setShowForm(true);
+  }
+  async function handleSave(){
+    if(!form.name||!form.login_id||!form.tempPassword)return;
+    let ok;
+    if(editId!==null)ok=await updateEmployee(editId,{...form,password:form.tempPassword});
+    else ok=await addEmployee(form);
+    if(ok!==false){setShowForm(false);setEditId(null);}
+  }
+  return (
+    <div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+        <h3 style={{...S.secTitle,margin:0}}>{t("社員一覧","직원 목록")} ({employees.length}{t("名","명")})</h3>
+        <button style={S.primaryBtn} onClick={openAdd}>+ {t("社員を追加","직원 추가")}</button>
+      </div>
+      <div style={{display:"flex",flexDirection:"column",gap:10}}>
+        {employees.length===0&&<div style={S.empty}>{t("社員がいません","직원이 없습니다")}</div>}
+        {employees.map(emp=>(
+          <div key={emp.id} style={S.memberRow}>
+            <div style={{display:"flex",gap:12,alignItems:"center",flex:1}}>
+              <div style={S.smAv}>{emp.avatar}</div>
+              <div style={{flex:1}}>
+                <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+                  <span style={{fontWeight:700,fontSize:14}}>{lang==="ja"?emp.name:emp.name_ko}</span>
+                  {emp.must_change_password
+                    ?<span style={{...S.rolePill,background:"#fef3c7",color:"#92400e",fontSize:10}}>{t("仮PW","임시PW")}</span>
+                    :<span style={{...S.rolePill,background:"#d1fae5",color:"#065f46",fontSize:10}}>{t("PW変更済","PW변경됨")}</span>}
+                </div>
+                <div style={{fontSize:12,color:"#6b7280",marginTop:2}}>
+                  {emp.dept} ·
+                  <span style={{background:COLOR.sentaku.bg,color:COLOR.sentaku.text,
+                    fontSize:10,padding:"0 5px",borderRadius:4,marginLeft:4,fontWeight:700}}>
+                    {emp.selected_day_off}曜
+                  </span>
+                  · {t("有給残","잔여유급")}: {emp.remaining_paid_leave}{t("日","일")}
+                </div>
+                <div style={{display:"flex",alignItems:"center",gap:10,marginTop:4,flexWrap:"wrap"}}>
+                  <span style={{fontSize:11,color:"#9ca3af"}}>ID: <code style={S.code}>{emp.login_id}</code></span>
+                  <span style={{fontSize:11,color:"#9ca3af",display:"flex",alignItems:"center",gap:4}}>
+                    PW: <code style={S.code}>{visiblePwIds[emp.id]?emp.password:"••••••••"}</code>
+                    <button onClick={()=>togglePw(emp.id)}
+                      style={{background:"none",border:"none",cursor:"pointer",fontSize:13,padding:0,color:"#9ca3af"}}>
+                      {visiblePwIds[emp.id]?"🙈":"👁"}
+                    </button>
+                  </span>
+                </div>
+              </div>
+            </div>
+            <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+              <button style={S.editBtn} onClick={()=>openEdit(emp)}>✏️</button>
+              <button style={{...S.editBtn,background:"#f3e8ff",color:"#7e22ce"}}
+                onClick={()=>{setResetModal(emp);setNewTempPw("temp1234");}}>🔑</button>
+              <button style={{...S.editBtn,background:"#dcfce7",color:"#166534"}}
+                onClick={()=>setSchedModal(emp)} title={t("休暇を代わりに登録","휴가 대리 등록")}>📅</button>
+              <button style={{...S.editBtn,background:"#fef9c3",color:"#854d0e"}}
+                onClick={()=>{setLeaveModal(emp);setNewLeave(emp.remaining_paid_leave);}}
+                title={t("有給日数を修正","유급일수 수정")}>✏️有給</button>
+              <button style={S.delBtn} onClick={()=>setConfirmDel(emp)}>🗑</button>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {showForm&&(
+        <div style={S.overlay} onClick={()=>setShowForm(false)}>
+          <div style={{...S.modalBox,maxWidth:520}} onClick={e=>e.stopPropagation()}>
+            <h3 style={S.modalTitle}>{editId!==null?t("社員情報を編集","직원 정보 수정"):t("新しい社員を追加","새 직원 추가")}</h3>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+              <Field label={t("氏名（日本語）","이름(일본어)")} req>
+                <input style={S.input} value={form.name} onChange={e=>setForm(f=>({...f,name:e.target.value}))} placeholder="田中 健太"/>
+              </Field>
+              <Field label={t("氏名（韓国語）","이름(한국어)")}>
+                <input style={S.input} value={form.nameKo} onChange={e=>setForm(f=>({...f,nameKo:e.target.value}))} placeholder="다나카 켄타"/>
+              </Field>
+              <Field label={t("ログインID","로그인 ID")} req>
+                <input style={S.input} value={form.login_id} onChange={e=>setForm(f=>({...f,login_id:e.target.value}))} placeholder="tanaka"/>
+              </Field>
+              <Field label={t("仮パスワード","임시 비밀번호")} req>
+                <div style={{position:"relative"}}>
+                  <input style={{...S.input,paddingRight:36}} value={form.tempPassword}
+                    type={showPw?"text":"password"} onChange={e=>setForm(f=>({...f,tempPassword:e.target.value}))}/>
+                  <button style={S.eyeBtn} onClick={()=>setShowPw(v=>!v)}>{showPw?"🙈":"👁"}</button>
+                </div>
+                <div style={{fontSize:10,color:"#9ca3af",marginTop:3}}>{t("初回ログイン時に変更が求められます","첫 로그인 시 변경이 필요합니다")}</div>
+              </Field>
+              <Field label={t("部署","부서")}>
+                <select style={S.input} value={form.dept} onChange={e=>setForm(f=>({...f,dept:e.target.value}))}>
+                  {DEPT_OPTIONS.map(d=><option key={d}>{d}</option>)}
+                </select>
+              </Field>
+              <Field label={t("選択休暇曜日","선택휴무 요일")}>
+                <select style={S.input} value={form.selectedDayOff} onChange={e=>setForm(f=>({...f,selectedDayOff:e.target.value}))}>
+                  {["月","水","土"].map(d=>(
+                    <option key={d} value={d}>{d}曜日</option>
+                  ))}
+                </select>
+              </Field>
+              <Field label={t("有給残日数","잔여 유급일수")}>
+                <input style={S.input} type="number" min="0" max="40" value={form.remainingPaidLeave}
+                  onChange={e=>setForm(f=>({...f,remainingPaidLeave:e.target.value}))}/>
+              </Field>
+            </div>
+            <div style={{display:"flex",gap:8,marginTop:20}}>
+              <button style={S.primaryBtn} onClick={handleSave}>{editId!==null?t("更新","업데이트"):t("追加","추가")}</button>
+              <button style={S.closeBtn} onClick={()=>setShowForm(false)}>{t("キャンセル","취소")}</button>
+            </div>
+          </div>
         </div>
       )}
 
-      {page === "calendar" && (
-        <div style={{ padding: 40, textAlign: "center" }}>
-          <button
-            onClick={() => setPage("menu")}
-            style={{ margin: 16, padding: "8px 16px", border: "1px solid #D3D1C7", borderRadius: 10, background: "#fff", cursor: "pointer" }}
-          >
-            ← メニューに戻る
-          </button>
-          <div style={{ fontSize: 18, color: "#888" }}>カレンダー機能は準備中です</div>
+      {resetModal&&(
+        <div style={S.overlay} onClick={()=>setResetModal(null)}>
+          <div style={{...S.modalBox,maxWidth:380}} onClick={e=>e.stopPropagation()}>
+            <h3 style={S.modalTitle}>🔑 {t("仮パスワード再発行","임시 비밀번호 재발급")}</h3>
+            <div style={{background:"#f8fafc",borderRadius:10,padding:"12px 14px",marginBottom:16,
+              display:"flex",alignItems:"center",gap:10}}>
+              <div style={S.smAv}>{resetModal.avatar}</div>
+              <div><div style={{fontWeight:700}}>{lang==="ja"?resetModal.name:resetModal.name_ko}</div>
+                <div style={{fontSize:12,color:"#9ca3af"}}>ID: {resetModal.login_id}</div></div>
+            </div>
+            <div style={S.fg}>
+              <label style={S.fl}>{t("新しい仮パスワード","새 임시 비밀번호")}</label>
+              <input style={S.input} value={newTempPw} onChange={e=>setNewTempPw(e.target.value)}/>
+            </div>
+            <div style={{display:"flex",gap:8,marginTop:16}}>
+              <button style={S.primaryBtn} onClick={()=>{resetPassword(resetModal.id,newTempPw);setResetModal(null);}}>
+                {t("再発行する","재발급하기")}
+              </button>
+              <button style={S.closeBtn} onClick={()=>setResetModal(null)}>{t("キャンセル","취소")}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {confirmDel&&(
+        <div style={S.overlay} onClick={()=>setConfirmDel(null)}>
+          <div style={{...S.modalBox,maxWidth:360}} onClick={e=>e.stopPropagation()}>
+            <h3 style={{...S.modalTitle,color:"#ef4444"}}>🗑 {t("本当に削除しますか？","정말 삭제할까요?")}</h3>
+            <p style={{fontSize:14,color:"#374151",marginBottom:20}}>
+              <strong>{lang==="ja"?confirmDel.name:confirmDel.name_ko}</strong>{t("さんを削除します。","님을 삭제합니다.")}
+            </p>
+            <div style={{display:"flex",gap:8}}>
+              <button style={{...S.rejectBtn,padding:"10px 20px",fontSize:14}}
+                onClick={()=>{deleteEmployee(confirmDel.id);setConfirmDel(null);}}>
+                {t("削除","삭제")}
+              </button>
+              <button style={S.closeBtn} onClick={()=>setConfirmDel(null)}>{t("キャンセル","취소")}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {schedModal&&(
+        <AdminSchedModal t={t} lang={lang} emp={schedModal}
+          requests={requests}
+          onAdd={(r)=>onAddAdminRequest(r)}
+          onDelete={(id,req)=>onDeleteRequest(id,req)}
+          onEdit={async(id,data)=>{
+            try{
+              await db.updateRequest(id,data);
+              window.location.reload();
+            }catch(e){alert("エラー: "+e.message);}
+          }}
+          onClose={()=>setSchedModal(null)}/>
+      )}
+
+      {leaveModal&&(
+        <div style={S.overlay} onClick={()=>setLeaveModal(null)}>
+          <div style={{...S.modalBox,maxWidth:360}} onClick={e=>e.stopPropagation()}>
+            <h3 style={S.modalTitle}>✏️有給 {t("有給日数を修正","유급일수 수정")}</h3>
+            <div style={{background:"#f8fafc",borderRadius:10,padding:"12px 14px",marginBottom:16,
+              display:"flex",alignItems:"center",gap:10}}>
+              <div style={S.smAv}>{leaveModal.avatar}</div>
+              <div>
+                <div style={{fontWeight:700}}>{lang==="ja"?leaveModal.name:leaveModal.name_ko}</div>
+                <div style={{fontSize:12,color:"#9ca3af"}}>{t("現在","현재")}: {leaveModal.remaining_paid_leave}{t("日","일")}</div>
+              </div>
+            </div>
+            <div style={S.fg}>
+              <label style={S.fl}>{t("新しい有給残日数","새 잔여유급")}</label>
+              <input style={S.input} type="number" min="0" max="40" value={newLeave}
+                onChange={e=>setNewLeave(e.target.value)}/>
+            </div>
+            <div style={{display:"flex",gap:8,marginTop:16}}>
+              <button style={S.primaryBtn} onClick={()=>{onUpdateLeave(leaveModal.id,newLeave);setLeaveModal(null);}}>
+                {t("保存","저장")}
+              </button>
+              <button style={S.closeBtn} onClick={()=>setLeaveModal(null)}>{t("キャンセル","취소")}</button>
+            </div>
+          </div>
         </div>
       )}
     </div>
   );
 }
+
+// ══════════════════════════════════════════════════════════════════
+// 관리자 직접 휴가 관리 모달
+// ══════════════════════════════════════════════════════════════════
+function AdminSchedModal({t,lang,emp,requests,onAdd,onDelete,onEdit,onClose}){
+  const [type,setType]=useState("選択休暇");
+  const [date,setDate]=useState("");
+  const [half,setHalf]=useState(false);
+  const [note,setNote]=useState("");
+  const empReqs=requests.filter(r=>r.emp_id===emp.id).sort((a,b)=>a.date.localeCompare(b.date));
+  const SC={approved:"#10b981",pending:"#f59e0b",rejected:"#ef4444"};
+  const SL={approved:t("承認済","승인"),pending:t("審査中","심사중"),rejected:t("却下","반려")};
+
+  return (
+    <div style={S.overlay} onClick={onClose}>
+      <div style={{...S.modalBox,maxWidth:500}} onClick={e=>e.stopPropagation()}>
+        <h3 style={S.modalTitle}>📅 {lang==="ja"?emp.name:emp.name_ko} {t("の休暇管理","의 휴가관리")}</h3>
+
+        <div style={{background:"#f0fdf4",borderRadius:12,padding:"14px 16px",marginBottom:16}}>
+          <div style={{fontSize:13,fontWeight:700,color:"#166534",marginBottom:10}}>
+            + {t("新規登録（即時承認）","신규 등록(즉시 승인)")}
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
+            <div>
+              <label style={{...S.fl,fontSize:11}}>{t("種別","종류")}</label>
+              <select style={S.input} value={type} onChange={e=>setType(e.target.value)}>
+                <option value="選択休暇">{t("選択休暇","선택휴무")}</option>
+                <option value="有給休暇">{t("有給休暇","유급휴가")}</option>
+                <option value="代替休暇">{t("代替休暇","대체휴가")}</option>
+              </select>
+            </div>
+            <div>
+              <label style={{...S.fl,fontSize:11}}>{t("日付","날짜")}</label>
+              <input type="date" style={S.input} value={date} onChange={e=>setDate(e.target.value)}/>
+            </div>
+          </div>
+          {type==="有給休暇"&&(
+            <div style={{marginBottom:8}}>
+              <label style={{display:"flex",alignItems:"center",gap:8,fontSize:13,cursor:"pointer"}}>
+                <input type="checkbox" checked={half} onChange={e=>setHalf(e.target.checked)}/>
+                {t("半休","반차")}
+              </label>
+            </div>
+          )}
+          <input style={{...S.input,marginBottom:8}} value={note}
+            onChange={e=>setNote(e.target.value)} placeholder={t("備考（任意）","비고(선택)")}/>
+          <button style={{...S.primaryBtn,width:"100%",padding:"8px"}}
+            onClick={async()=>{
+              if(!date){alert(t("日付を選択してください","날짜를 선택해주세요"));return;}
+              const btn=document.activeElement;
+              if(btn) btn.disabled=true;
+              await onAdd({emp_id:emp.id,type,date,note,half});
+              if(btn) btn.disabled=false;
+            }}>
+            {t("登録する","등록하기")}
+          </button>
+        </div>
+
+        <div style={{fontSize:13,fontWeight:700,color:"#374151",marginBottom:8}}>
+          {t("申請履歴","신청 이력")} ({empReqs.length}{t("件","건")})
+        </div>
+        {empReqs.length===0?<div style={S.empty}>{t("申請なし","신청 없음")}</div>
+        :empReqs.map(r=>{
+          const cs=getChipStyle(r);
+          return (
+            <div key={r.id} style={{...S.pendItem,marginBottom:8,padding:"10px 12px"}}>
+              <div style={{display:"flex",gap:8,alignItems:"center",flex:1}}>
+                <span style={{background:cs.bg,color:cs.text,fontSize:11,
+                  padding:"1px 7px",borderRadius:5,fontWeight:700}}>
+                  {r.type==="選択休暇"?t("選択","선택"):r.half?t("半休","반차"):t("有給","유급")}
+                </span>
+                <span style={{fontSize:12,fontWeight:600}}>{r.date}</span>
+                <span style={{...S.pill,background:SC[r.status],fontSize:10}}>{SL[r.status]}</span>
+              </div>
+              <div style={{display:"flex",gap:4}}>
+                <button style={{...S.editBtn,padding:"4px 8px",fontSize:11}}
+                  onClick={()=>{
+                    const newDate=prompt(t("新しい日付を入力 (例: 2026-07-01)","새 날짜 입력 (예: 2026-07-01)"),r.date);
+                    if(newDate&&newDate!==r.date) onEdit(r.id,{date:newDate});
+                  }}>
+                  ✏️ {t("変更","변경")}
+                </button>
+                <button style={{...S.rejectBtn,padding:"4px 8px",fontSize:11}}
+                  onClick={()=>onDelete(r.id,r)}>
+                  🗑 {t("削除","삭제")}
+                </button>
+              </div>
+            </div>
+          );
+        })}
+
+        <button style={{...S.closeBtn,marginTop:12,width:"100%",textAlign:"center"}}
+          onClick={onClose}>{t("閉じる","닫기")}</button>
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════
+// 휴가 신청 모달
+// ══════════════════════════════════════════════════════════════════
+function ReqModal({t,initDate,empId,selectedDayOff,onSubmit,onClose}){
+  const [type,setType]=useState("選択休暇");
+  const [date,setDate]=useState(initDate||"");
+  const [note,setNote]=useState("");
+  const [half,setHalf]=useState(false);
+
+  const dayOffLabel="月・水・土";
+
+  return (
+    <div style={S.overlay} onClick={onClose}>
+      <div style={S.modalBox} onClick={e=>e.stopPropagation()}>
+        <h3 style={S.modalTitle}>📋 {t("休暇申請","휴가 신청")}</h3>
+
+        <div style={S.fg}>
+          <label style={S.fl}>{t("休暇の種類","휴가 종류")}</label>
+          <div style={{display:"flex",gap:8}}>
+            {[
+              {val:"選択休暇",bg:COLOR.sentaku.bg,tc:COLOR.sentaku.text,
+               label:t(`選択休暇（${dayOffLabel}）`,`선택휴무(${dayOffLabel})`)},
+              {val:"有給休暇",bg:COLOR.yukyu.bg,tc:COLOR.yukyu.text,
+               label:t("有給休暇","유급휴가")},
+              {val:"代替休暇",bg:COLOR.daitai.bg,tc:COLOR.daitai.text,
+               label:t("代替休暇","대체휴가")},
+            ].map(o=>(
+              <button key={o.val} onClick={()=>setType(o.val)}
+                style={{flex:1,padding:"10px 6px",border:`2px solid ${type===o.val?o.tc:"#e2e8f0"}`,
+                  borderRadius:10,background:type===o.val?o.bg:"#f8fafc",
+                  color:type===o.val?o.tc:"#6b7280",fontWeight:700,fontSize:13,cursor:"pointer"}}>
+                {o.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div style={S.fg}>
+          <label style={S.fl}>{t("日付","날짜")}</label>
+          <input type="date" style={S.input} value={date} onChange={e=>setDate(e.target.value)}/>
+          {type==="選択休暇"&&<div style={{fontSize:11,color:"#6366f1",marginTop:4}}>
+            ※ {t(`${dayOffLabel}のみ申請可能です`,`${dayOffLabel}만 신청 가능합니다`)}
+          </div>}
+        </div>
+
+        {type==="有給休暇"&&(
+          <div style={S.fg}>
+            <label style={S.fl}>{t("取得区分","사용 구분")}</label>
+            <div style={{display:"flex",gap:8}}>
+              {[
+                {val:false,label:t("全日","전일"),bg:COLOR.yukyu.bg,tc:COLOR.yukyu.text},
+                {val:true, label:t("半休","반차"),bg:COLOR.half.bg,tc:COLOR.half.text},
+              ].map(o=>(
+                <button key={String(o.val)} onClick={()=>setHalf(o.val)}
+                  style={{flex:1,padding:"8px",border:`2px solid ${half===o.val?o.tc:"#e2e8f0"}`,
+                    borderRadius:8,background:half===o.val?o.bg:"#f8fafc",
+                    color:half===o.val?o.tc:"#6b7280",fontWeight:700,fontSize:13,cursor:"pointer"}}>
+                  {o.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div style={S.fg}>
+          <label style={S.fl}>{t("備考・理由","비고·이유")}</label>
+          <textarea style={{...S.input,height:60,resize:"vertical"}} value={note}
+            onChange={e=>setNote(e.target.value)} placeholder={t("任意で入力","선택 입력")}/>
+        </div>
+
+        <div style={{display:"flex",gap:8,marginTop:16}}>
+          <button style={S.primaryBtn} onClick={()=>onSubmit({empId,type,date,note,half})}>
+            {t("申請する","신청하기")}
+          </button>
+          <button style={S.closeBtn} onClick={onClose}>{t("キャンセル","취소")}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════
+// 비밀번호 변경 모달
+// ══════════════════════════════════════════════════════════════════
+function ChangePwModal({t,user,onSave,onClose}){
+  const [cur,setCur]=useState("");const [nw,setNw]=useState("");const [nw2,setNw2]=useState("");
+  const [show,setShow]=useState(false);const [err,setErr]=useState("");
+  function handleSave(){
+    if(cur!==user.password){setErr(t("現在のパスワードが違います","현재 비밀번호가 틀립니다"));return;}
+    if(nw.length<6){setErr(t("6文字以上","6자 이상"));return;}
+    if(nw!==nw2){setErr(t("パスワードが一致しません","비밀번호 불일치"));return;}
+    setErr("");onSave(nw);onClose();
+  }
+  return (
+    <div style={S.overlay} onClick={onClose}>
+      <div style={S.modalBox} onClick={e=>e.stopPropagation()}>
+        <h3 style={S.modalTitle}>🔑 {t("パスワード変更","비밀번호 변경")}</h3>
+        <div style={S.fg}><label style={S.fl}>{t("現在のパスワード","현재 비밀번호")}</label>
+          <div style={{position:"relative"}}>
+            <input style={{...S.input,paddingRight:40}} value={cur} type={show?"text":"password"}
+              onChange={e=>{setCur(e.target.value);setErr("");}}/>
+            <button style={S.eyeBtn} onClick={()=>setShow(v=>!v)}>{show?"🙈":"👁"}</button>
+          </div>
+        </div>
+        <div style={S.fg}><label style={S.fl}>{t("新しいパスワード","새 비밀번호")}</label>
+          <input style={S.input} value={nw} type="password"
+            onChange={e=>{setNw(e.target.value);setErr("");}} placeholder={t("6文字以上","6자 이상")}/>
+        </div>
+        <div style={S.fg}><label style={S.fl}>{t("パスワード確認","비밀번호 확인")}</label>
+          <input style={S.input} value={nw2} type="password"
+            onChange={e=>{setNw2(e.target.value);setErr("");}} onKeyDown={e=>e.key==="Enter"&&handleSave()}/>
+        </div>
+        {err&&<div style={{color:"#ef4444",fontSize:12,marginBottom:8}}>⚠ {err}</div>}
+        <div style={{display:"flex",gap:8,marginTop:16}}>
+          <button style={S.primaryBtn} onClick={handleSave}>{t("変更する","변경하기")}</button>
+          <button style={S.closeBtn} onClick={onClose}>{t("キャンセル","취소")}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════
+// 공통 컴포넌트들
+// ══════════════════════════════════════════════════════════════════
+function CalHeader({year,month,prev,next}){
+  return (<div style={{display:"flex",alignItems:"center",gap:16}}>
+    <button style={S.navBtn} onClick={prev}>‹</button>
+    <h2 style={{fontSize:20,fontWeight:800,margin:0}}>{year}年 {MONTHS_JP[month]}</h2>
+    <button style={S.navBtn} onClick={next}>›</button>
+  </div>);
+}
+function CalGrid({year,month,daysInMonth,firstDay,dayLabels,renderDay}){
+  const cells=[];
+  for(let i=0;i<firstDay;i++) cells.push(<div key={`e${i}`}/>);
+  for(let d=1;d<=daysInMonth;d++) cells.push(renderDay(fmt(year,month,d),d));
+  return (<div style={S.calGrid}>
+    {dayLabels.map((l,i)=><div key={l} style={{...S.dayHdr,
+      ...(i===0?{color:"#ef4444"}:i===6?{color:"#3b82f6"}:{})}}>{l}</div>)}
+    {cells}
+  </div>);
+}
+function LangToggle({lang,setLang}){
+  return (<div style={S.langSwitch}>
+    <button style={{...S.langBtn,...(lang==="ja"?S.langOn:{})}} onClick={()=>setLang("ja")}>日本語</button>
+    <button style={{...S.langBtn,...(lang==="ko"?S.langOn:{})}} onClick={()=>setLang("ko")}>한국어</button>
+  </div>);
+}
+function Toast({msg,type}){
+  return <div style={{...S.toast,
+    background:type==="error"?"#ef4444":type==="warn"?"#f59e0b":"#10b981"}}>{msg}</div>;
+}
+function Field({label,req,children}){
+  return (<div><label style={{display:"block",fontSize:12,fontWeight:700,color:"#374151",marginBottom:5}}>
+    {label}{req&&<span style={{color:"#ef4444",marginLeft:3}}>*</span>}
+  </label>{children}</div>);
+}
+
+const S={
+  root:{minHeight:"100vh",background:"#f1f5f9",fontFamily:"'Noto Sans JP','Malgun Gothic',sans-serif",color:"#1e293b"},
+  loginBg:{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",
+    background:"linear-gradient(135deg,#6366f1 0%,#8b5cf6 50%,#a78bfa 100%)",padding:16},
+  loginCard:{background:"#fff",borderRadius:20,padding:"32px 28px",width:"100%",maxWidth:420,
+    boxShadow:"0 24px 80px rgba(0,0,0,0.2)"},
+  loginSub:{fontSize:12,color:"#9ca3af",textAlign:"center",marginBottom:8},
+  eyeBtn:{position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",
+    background:"none",border:"none",cursor:"pointer",fontSize:16,color:"#9ca3af"},
+  header:{background:"#fff",borderBottom:"1px solid #e2e8f0",padding:"12px 20px",
+    display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,flexWrap:"wrap",
+    position:"sticky",top:0,zIndex:100,boxShadow:"0 1px 4px rgba(0,0,0,0.06)"},
+  logo:{display:"flex",alignItems:"center",gap:10},
+  logoIcon:{width:40,height:40,background:"#fff",border:"2px solid #e2e8f0",borderRadius:10,
+    display:"flex",alignItems:"center",justifyContent:"center"},
+  logoSub:{fontSize:11,color:"#94a3b8"},
+  userChip:{display:"flex",alignItems:"center",gap:8,background:"#f8fafc",
+    border:"1px solid #e2e8f0",borderRadius:10,padding:"6px 12px"},
+  userAv:{width:28,height:28,borderRadius:"50%",background:"linear-gradient(135deg,#6366f1,#a78bfa)",
+    color:"#fff",fontSize:13,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center"},
+  rolePill:{fontSize:11,fontWeight:700,padding:"2px 8px",borderRadius:6},
+  logoutBtn:{background:"#f1f5f9",border:"none",borderRadius:8,padding:"6px 14px",
+    fontSize:13,cursor:"pointer",fontWeight:600,color:"#374151"},
+  langSwitch:{display:"flex",background:"#f1f5f9",borderRadius:8,overflow:"hidden"},
+  langBtn:{padding:"5px 12px",border:"none",background:"transparent",cursor:"pointer",
+    fontSize:12,color:"#64748b",fontWeight:600},
+  langOn:{background:"#6366f1",color:"#fff",borderRadius:8},
+  main:{maxWidth:1200,margin:"0 auto",padding:"20px 16px"},
+  empLayout:{display:"grid",gridTemplateColumns:"260px 1fr",gap:20},
+  sidebar:{display:"flex",flexDirection:"column",gap:14},
+  card:{background:"#fff",borderRadius:14,padding:18,boxShadow:"0 1px 4px rgba(0,0,0,0.06)"},
+  bigAv:{width:52,height:52,borderRadius:"50%",
+    background:"linear-gradient(135deg,#6366f1,#a78bfa)",color:"#fff",fontSize:22,fontWeight:700,
+    display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 10px"},
+  smAv:{width:36,height:36,borderRadius:"50%",
+    background:"linear-gradient(135deg,#6366f1,#a78bfa)",color:"#fff",fontSize:15,fontWeight:700,
+    display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0},
+  empName:{fontSize:16,fontWeight:700,textAlign:"center",marginBottom:4},
+  empDept:{fontSize:12,color:"#6b7280",textAlign:"center",marginBottom:10},
+  infoRow:{display:"flex",justifyContent:"space-between",alignItems:"center"},
+  badge:{background:"#ede9fe",color:"#6d28d9",padding:"2px 8px",borderRadius:10,fontSize:12,fontWeight:700},
+  statTitle:{fontSize:12,color:"#6b7280",marginBottom:4},
+  statBig:{fontSize:36,fontWeight:800,lineHeight:1},
+  bar:{height:6,background:"#e2e8f0",borderRadius:3,margin:"8px 0 4px",overflow:"hidden"},
+  barFill:{height:"100%",background:"#6366f1",borderRadius:3,transition:"width 0.4s"},
+  histItem:{background:"#f8fafc",borderRadius:8,padding:10,marginBottom:8,fontSize:12},
+  pill:{color:"#fff",fontSize:10,padding:"1px 7px",borderRadius:8,fontWeight:600},
+  cancelBtn:{marginTop:6,background:"#fee2e2",color:"#991b1b",border:"none",borderRadius:6,
+    padding:"3px 10px",fontSize:11,cursor:"pointer",fontWeight:600},
+  calWrap:{background:"#fff",borderRadius:16,padding:20,boxShadow:"0 1px 4px rgba(0,0,0,0.06)"},
+  calGrid:{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:3},
+  dayHdr:{textAlign:"center",fontSize:12,fontWeight:700,color:"#6b7280",padding:"6px 0"},
+  dayCell:{border:"1px solid #f1f5f9",borderRadius:8,padding:"5px 6px",minHeight:70,
+    cursor:"pointer",fontSize:12,transition:"background 0.1s"},
+  dayCellOff:{background:"#f8fafc",cursor:"default"},
+  dayNum:{fontSize:13,fontWeight:700,color:"#374151"},
+  holTag:{fontSize:9,background:"#fee2e2",color:"#991b1b",borderRadius:4,padding:"1px 3px",
+    maxWidth:36,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"},
+  chip:{fontSize:10,padding:"2px 5px",borderRadius:5,fontWeight:700,marginTop:2,display:"block",
+    overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"},
+  adminWrap:{background:"#fff",borderRadius:16,overflow:"hidden",boxShadow:"0 1px 4px rgba(0,0,0,0.06)"},
+  tabBar:{display:"flex",gap:2,background:"#f8fafc",padding:"10px 14px 0",
+    borderBottom:"1px solid #e2e8f0",alignItems:"center",overflowX:"auto"},
+  tab:{padding:"8px 14px",border:"none",background:"transparent",cursor:"pointer",
+    fontSize:13,fontWeight:600,color:"#6b7280",borderBottom:"2px solid transparent",
+    marginBottom:-1,whiteSpace:"nowrap"},
+  tabOn:{color:"#6366f1",borderBottom:"2px solid #6366f1"},
+  csvBtn:{background:"#f1f5f9",border:"none",borderRadius:8,padding:"6px 14px",
+    fontSize:12,cursor:"pointer",fontWeight:600,color:"#374151",marginBottom:2,whiteSpace:"nowrap"},
+  select:{padding:"6px 10px",border:"1px solid #e2e8f0",borderRadius:8,fontSize:13,
+    background:"#fff",cursor:"pointer"},
+  warnBanner:{background:"#fef3c7",border:"1px solid #f59e0b",borderRadius:10,
+    padding:"10px 16px",marginBottom:12,fontSize:13,color:"#92400e",
+    display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"},
+  warnDate:{background:"#f59e0b",color:"#fff",borderRadius:6,padding:"1px 7px",fontSize:11,fontWeight:700},
+  navBtn:{background:"#f1f5f9",border:"none",borderRadius:8,width:34,height:34,
+    fontSize:20,cursor:"pointer",color:"#374151",fontWeight:700},
+  pendItem:{display:"flex",justifyContent:"space-between",alignItems:"center",
+    padding:"12px 14px",border:"1px solid #e2e8f0",borderRadius:10,marginBottom:10,
+    background:"#fafafa",flexWrap:"wrap",gap:8},
+  approveBtn:{background:"#d1fae5",color:"#065f46",border:"none",borderRadius:8,
+    padding:"6px 14px",fontSize:13,fontWeight:700,cursor:"pointer"},
+  rejectBtn:{background:"#fee2e2",color:"#991b1b",border:"none",borderRadius:8,
+    padding:"6px 14px",fontSize:13,fontWeight:700,cursor:"pointer"},
+  memberRow:{display:"flex",justifyContent:"space-between",alignItems:"center",
+    padding:"14px 16px",border:"1px solid #e2e8f0",borderRadius:12,background:"#fafafa",
+    flexWrap:"wrap",gap:8},
+  editBtn:{background:"#e0f2fe",color:"#0369a1",border:"none",borderRadius:8,
+    padding:"6px 12px",fontSize:12,fontWeight:700,cursor:"pointer"},
+  delBtn:{background:"#fee2e2",color:"#991b1b",border:"none",borderRadius:8,
+    padding:"6px 10px",fontSize:14,cursor:"pointer"},
+  secTitle:{fontSize:15,fontWeight:800,marginBottom:14,color:"#1e293b"},
+  statsGrid:{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))",gap:12},
+  statItem:{background:"#f8fafc",borderRadius:12,padding:14,border:"1px solid #e2e8f0"},
+  sRow:{display:"flex",justifyContent:"space-between",fontSize:13,color:"#374151",marginTop:6},
+  overlay:{position:"fixed",inset:0,background:"rgba(0,0,0,0.45)",display:"flex",
+    alignItems:"center",justifyContent:"center",zIndex:1000,padding:16},
+  modalBox:{background:"#fff",borderRadius:16,padding:28,width:"100%",maxWidth:460,
+    boxShadow:"0 20px 60px rgba(0,0,0,0.2)",maxHeight:"90vh",overflowY:"auto"},
+  modalTitle:{fontSize:18,fontWeight:800,marginBottom:20,color:"#1e293b"},
+  fg:{marginBottom:14},
+  fl:{display:"block",fontSize:12,fontWeight:700,color:"#374151",marginBottom:6},
+  input:{width:"100%",padding:"9px 12px",border:"1px solid #e2e8f0",borderRadius:8,
+    fontSize:14,outline:"none",background:"#f8fafc",boxSizing:"border-box"},
+  primaryBtn:{background:"linear-gradient(135deg,#6366f1,#8b5cf6)",color:"#fff",border:"none",
+    borderRadius:10,padding:"10px 24px",fontSize:14,fontWeight:700,cursor:"pointer",
+    boxShadow:"0 2px 8px rgba(99,102,241,0.3)"},
+  closeBtn:{background:"#f1f5f9",color:"#374151",border:"none",borderRadius:10,
+    padding:"10px 20px",fontSize:14,fontWeight:600,cursor:"pointer"},
+  toast:{position:"fixed",top:20,right:20,zIndex:9999,color:"#fff",padding:"12px 20px",
+    borderRadius:12,fontSize:13,fontWeight:600,boxShadow:"0 4px 20px rgba(0,0,0,0.2)",maxWidth:360},
+  code:{fontSize:11,background:"#e2e8f0",padding:"1px 6px",borderRadius:4,fontFamily:"monospace"},
+  empty:{color:"#9ca3af",textAlign:"center",padding:"20px 0",fontSize:13},
+};
+
