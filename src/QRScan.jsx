@@ -144,7 +144,7 @@ export default function QRScan({ employee }) {
     setPhase("locating");
 
     // QR 값이 근무지 id(UUID)와 일치하는지 확인
-    if (qrText.trim() !== selectedWP.id.trim()) {
+    if (qrText.trim() !== selectedWP.qr_code?.trim()) {
       setErrorMsg(`QRコードが一致しません。\n正しい ${selectedWP.name} のQRコードをスキャンしてください。`);
       setPhase("error");
       return;
