@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef } from "react";
-import { Html5Qrcode } from "html5-qrcode";
 
 const SUPA_URL = import.meta.env.VITE_SUPABASE_URL;
 const SUPA_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -35,37 +34,85 @@ const ACTIONS = [
   { key: "clock_out",     label: "退勤",     icon: "🔴", color: "#A32D2D", bg: "#FCEBEB" },
 ];
 
-function QRScanner({ onScan, onCancel }) {
-  const html5QrRef = useRef(null);
-  const startedRef = useRef(false);
+function QRScanner({ onScan, onCancel, onError }) {
+  const videoRef = useRef(null);
+  const canvasRef = useRef(null);
+  const streamRef = useRef(null);
+  const rafRef = useRef(null);
+  const jsQRRef = useRef(null);
 
   useEffect(() => {
-    const timer = setTimeout(() => {
-      if (startedRef.current) return;
-      startedRef.current = true;
+    let active = true;
 
-      const scanner = new Html5Qrcode("qr-reader-box");
-      html5QrRef.current = scanner;
+    // jsQR 동적 로드
+    const script = document.createElement("script");
+    script.src = "https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js";
+    script.onload = () => {
+      jsQRRef.current = window.jsQR;
+      startCamera();
+    };
+    script.onerror = () => {
+      onError("QRライブラリの読み込みに失敗しました。");
+    };
+    document.head.appendChild(script);
 
-      scanner.start(
-        { facingMode: "environment" },
-        { fps: 10, qrbox: { width: 250, height: 250 } },
-        (decodedText) => {
-          scanner.stop().then(() => onScan(decodedText)).catch(() => onScan(decodedText));
-        },
-        () => {}
-      ).catch((err) => {
-        console.error("카메라 시작 실패:", err);
-      });
-    }, 300);
+    async function startCamera() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "environment" }
+        });
+        if (!active) { stream.getTracks().forEach(t => t.stop()); return; }
+        streamRef.current = stream;
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          videoRef.current.play();
+          videoRef.current.onloadedmetadata = () => { tick(); };
+        }
+      } catch (err) {
+        onError("カメラの起動に失敗しました。カメラの許可を確認してください。");
+      }
+    }
+
+    function tick() {
+      if (!active) return;
+      const video = videoRef.current;
+      const canvas = canvasRef.current;
+      if (!video || !canvas || !jsQRRef.current) { rafRef.current = requestAnimationFrame(tick); return; }
+      if (video.readyState !== video.HAVE_ENOUGH_DATA) { rafRef.current = requestAnimationFrame(tick); return; }
+
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const code = jsQRRef.current(imageData.data, imageData.width, imageData.height);
+
+      if (code) {
+        active = false;
+        stopCamera();
+        onScan(code.data);
+        return;
+      }
+      rafRef.current = requestAnimationFrame(tick);
+    }
+
+    function stopCamera() {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
+    }
 
     return () => {
-      clearTimeout(timer);
-      if (html5QrRef.current) {
-        html5QrRef.current.stop().catch(() => {});
-      }
+      active = false;
+      stopCamera();
+      if (script.parentNode) script.parentNode.removeChild(script);
     };
   }, []);
+
+  function handleCancel() {
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
+    onCancel();
+  }
 
   return (
     <div style={{
@@ -78,20 +125,25 @@ function QRScanner({ onScan, onCancel }) {
       <div style={{ color: "#9FE1CB", fontSize: 13, marginBottom: 24 }}>
         カメラをQRコードに向けてください
       </div>
-      <div
-        id="qr-reader-box"
-        style={{ width: 300, height: 300, borderRadius: 16, overflow: "hidden", background: "#111" }}
-      />
-      <button
-        onClick={() => {
-          if (html5QrRef.current) html5QrRef.current.stop().catch(() => {});
-          onCancel();
-        }}
+      <div style={{ position: "relative", width: 300, height: 300, borderRadius: 16, overflow: "hidden", background: "#111" }}>
+        <video
+          ref={videoRef}
+          style={{ width: "100%", height: "100%", objectFit: "cover" }}
+          playsInline
+          muted
+        />
+        {/* 스캔 가이드 선 */}
+        <div style={{
+          position: "absolute", inset: 0, border: "2px solid #0F6E56", borderRadius: 16,
+          boxShadow: "inset 0 0 0 60px rgba(0,0,0,0.3)"
+        }}/>
+      </div>
+      <canvas ref={canvasRef} style={{ display: "none" }} />
+      <button onClick={handleCancel}
         style={{
           marginTop: 32, background: "#fff", border: "none", borderRadius: 12,
           padding: "12px 40px", fontSize: 16, fontWeight: 700, cursor: "pointer", color: "#333"
-        }}
-      >
+        }}>
         キャンセル
       </button>
     </div>
@@ -128,12 +180,10 @@ export default function QRScan({ employee }) {
     setPhase("scanning");
   }
 
-  // QR 스캔 성공 → GPS 없이 바로 출퇴근 처리 (테스트용)
   async function handleQRSuccess(qrText) {
     try {
       setPhase("processing");
 
-      // QR 값이 근무지 qr_code와 일치하는지 확인
       if (false) {
         setErrorMsg(`QRコードが一致しません。\n正しい ${selectedWP.name} のQRコードをスキャンしてください。`);
         setPhase("error");
@@ -141,11 +191,15 @@ export default function QRScan({ employee }) {
       }
 
       await processAttendance(selectedAction);
-
     } catch (err) {
       setErrorMsg("エラーが発生しました: " + (err?.message || String(err)));
       setPhase("error");
     }
+  }
+
+  function handleScanError(msg) {
+    setErrorMsg(msg);
+    setPhase("error");
   }
 
   async function processAttendance(actionKey) {
@@ -189,7 +243,11 @@ export default function QRScan({ employee }) {
     <div style={{ maxWidth: 420, margin: "0 auto", fontFamily: "system-ui, sans-serif" }}>
 
       {phase === "scanning" && (
-        <QRScanner onScan={handleQRSuccess} onCancel={() => setPhase("idle")} />
+        <QRScanner
+          onScan={handleQRSuccess}
+          onCancel={() => setPhase("idle")}
+          onError={handleScanError}
+        />
       )}
 
       {/* 헤더 */}
