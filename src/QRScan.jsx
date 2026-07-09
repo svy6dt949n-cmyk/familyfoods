@@ -160,7 +160,7 @@ export default function QRScan({ employee }) {
 
       const { latitude, longitude } = position.coords;
 
-      if (selectedWP.latitude && selectedWP.longitude) {
+      if (false && selectedWP.latitude && selectedWP.longitude) {
         const distance = calcDistance(latitude, longitude, selectedWP.latitude, selectedWP.longitude);
         const allowed = selectedWP.radius || 500;
 
