@@ -28,17 +28,6 @@ function fmtTime(date) {
   });
 }
 
-function calcDistance(lat1, lng1, lat2, lng2) {
-  const R = 6371000;
-  const dLat = (lat2 - lat1) * Math.PI / 180;
-  const dLng = (lng2 - lng1) * Math.PI / 180;
-  const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-    Math.sin(dLng / 2) * Math.sin(dLng / 2);
-  return Math.round(6371000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
-}
-
 const ACTIONS = [
   { key: "clock_in",      label: "出勤",     icon: "🟢", color: "#0F6E56", bg: "#E1F5EE" },
   { key: "outside_start", label: "外出",     icon: "🟡", color: "#854F0B", bg: "#FAEEDA" },
@@ -51,7 +40,6 @@ function QRScanner({ onScan, onCancel }) {
   const startedRef = useRef(false);
 
   useEffect(() => {
-    // DOM이 마운트된 후 약간 딜레이를 주고 시작
     const timer = setTimeout(() => {
       if (startedRef.current) return;
       startedRef.current = true;
@@ -140,47 +128,27 @@ export default function QRScan({ employee }) {
     setPhase("scanning");
   }
 
+  // QR 스캔 성공 → GPS 없이 바로 출퇴근 처리 (테스트용)
   async function handleQRSuccess(qrText) {
-    setPhase("locating");
-
-    // QR 값이 근무지 id(UUID)와 일치하는지 확인
-    if (qrText.trim() !== selectedWP.qr_code?.trim()) {
-      setErrorMsg(`QRコードが一致しません。\n正しい ${selectedWP.name} のQRコードをスキャンしてください。`);
-      setPhase("error");
-      return;
-    }
-
-    // GPS 취득
     try {
-      const position = await new Promise((resolve, reject) =>
-        navigator.geolocation.getCurrentPosition(resolve, reject, {
-          enableHighAccuracy: true, timeout: 10000, maximumAge: 0,
-        })
-      );
+      setPhase("processing");
 
-      const { latitude, longitude } = position.coords;
-
-      if (false && selectedWP.latitude && selectedWP.longitude) {
-        const distance = calcDistance(latitude, longitude, selectedWP.latitude, selectedWP.longitude);
-        const allowed = selectedWP.radius || 500;
-
-        if (distance > allowed) {
-          setErrorMsg(`現在地が ${selectedWP.name} から ${distance}m 離れています。\n${allowed}m 以内で打刻してください。`);
-          setPhase("error");
-          return;
-        }
+      // QR 값이 근무지 qr_code와 일치하는지 확인
+      if (qrText.trim() !== selectedWP.qr_code?.trim()) {
+        setErrorMsg(`QRコードが一致しません。\n正しい ${selectedWP.name} のQRコードをスキャンしてください。`);
+        setPhase("error");
+        return;
       }
 
-      setPhase("processing");
-      await processAttendance(selectedAction, latitude, longitude);
+      await processAttendance(selectedAction);
 
-    } catch {
-      setErrorMsg("GPS位置の取得に失敗しました。\n位置情報の許可を確認してください。");
+    } catch (err) {
+      setErrorMsg("エラーが発生しました: " + (err?.message || String(err)));
       setPhase("error");
     }
   }
 
-  async function processAttendance(actionKey, lat, lng) {
+  async function processAttendance(actionKey) {
     const now = getJST();
     const workDate = now.toISOString().slice(0, 10);
 
@@ -208,8 +176,8 @@ export default function QRScan({ employee }) {
       setPhase("success");
       setTimeout(() => setPhase("idle"), 3000);
 
-    } catch {
-      setErrorMsg("記録の保存に失敗しました。もう一度お試しください。");
+    } catch (err) {
+      setErrorMsg("記録の保存に失敗しました: " + (err?.message || String(err)));
       setPhase("error");
     }
   }
@@ -259,15 +227,6 @@ export default function QRScan({ employee }) {
                 <div style={{ fontSize: 11, color: "#888", marginTop: 4 }}>QRスキャン</div>
               </button>
             ))}
-          </div>
-        )}
-
-        {/* GPS 확인 중 */}
-        {phase === "locating" && (
-          <div style={{ background: "#F1EFE8", borderRadius: 20, padding: "30px 18px", textAlign: "center", marginBottom: 14 }}>
-            <div style={{ fontSize: 48, marginBottom: 12 }}>📍</div>
-            <div style={{ fontSize: 16, color: "#5F5E5A", fontWeight: 600 }}>GPS位置確認中...</div>
-            <div style={{ fontSize: 12, color: "#888", marginTop: 8 }}>現在地を確認しています</div>
           </div>
         )}
 
