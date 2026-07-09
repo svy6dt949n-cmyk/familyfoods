@@ -829,7 +829,7 @@ function AdminView({lang,t,employees,allAccounts,requests,year,month,prevMonth,n
         )}
 
         {tab==="attendance"&&(
-          <AttendanceTab lang={lang} t={t} employees={employees}/>
+          <AttendanceTab lang={lang} t={t} employees={employees} workplaces={employees.length > 0 ? [] : []}/>
         )}
 
         {tab==="stats"&&(<>
@@ -1601,6 +1601,18 @@ function Field({label,req,children}){
 // 출퇴근 관리 탭
 // ══════════════════════════════════════════════════════════════════
 function AttendanceTab({ lang, t, employees }) {
+  const [workplaces, setWorkplaces] = useState([]);
+
+  useEffect(() => {
+    sbFetch("workplaces?is_active=eq.true&select=*").then(data => {
+      if (Array.isArray(data)) setWorkplaces(data);
+    });
+  }, []);
+
+  function getWPName(wpId) {
+    const wp = workplaces.find(w => w.id === wpId);
+    return wp ? wp.name : "-";
+  }
   const [viewMode, setViewMode] = useState("date");
   const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [selectedEmpId, setSelectedEmpId] = useState("");
@@ -1666,15 +1678,15 @@ function AttendanceTab({ lang, t, employees }) {
     let rows = [];
     if (viewMode === "date") {
       rows = [
-        ["日付", "社員名", "出勤時間", "退勤時間", "勤務時間", "状態"],
-        ...records.map(r => [r.work_date, getEmpName(r.employee_id), fmtTime(r.clock_in), fmtTime(r.clock_out), calcWork(r.clock_in, r.clock_out), r.status === "working" ? "出勤中" : "退勤済"])
+        ["日付", "社員名", "勤務地", "出勤時間", "退勤時間", "勤務時間", "状態"],
+        ...records.map(r => [r.work_date, getEmpName(r.employee_id), getWPName(r.workplace_id), fmtTime(r.clock_in), fmtTime(r.clock_out), calcWork(r.clock_in, r.clock_out), r.status === "working" ? "出勤中" : "退勤済"])
       ];
     } else {
       const emp = employees.find(e => e.id === selectedEmpId);
       const empName = lang === "ja" ? emp?.name : emp?.name_ko;
       rows = [
-        ["社員名", "日付", "出勤時間", "退勤時間", "勤務時間", "状態"],
-        ...records.map(r => [empName, r.work_date, fmtTime(r.clock_in), fmtTime(r.clock_out), calcWork(r.clock_in, r.clock_out), r.status === "working" ? "出勤中" : "退勤済"])
+        ["社員名", "日付", "勤務地", "出勤時間", "退勤時間", "勤務時間", "状態"],
+        ...records.map(r => [empName, r.work_date, getWPName(r.workplace_id), fmtTime(r.clock_in), fmtTime(r.clock_out), calcWork(r.clock_in, r.clock_out), r.status === "working" ? "出勤中" : "退勤済"])
       ];
     }
     const csv = rows.map(r => r.join(",")).join("\n");
@@ -1754,6 +1766,7 @@ function AttendanceTab({ lang, t, employees }) {
                 <th style={thS}>{t("出勤","출근")}</th>
                 <th style={thS}>{t("退勤","퇴근")}</th>
                 <th style={thS}>{t("勤務時間","근무시간")}</th>
+                <th style={thS}>{t("勤務地","근무지")}</th>
                 <th style={thS}>{t("状態","상태")}</th>
               </tr>
             </thead>
@@ -1764,6 +1777,7 @@ function AttendanceTab({ lang, t, employees }) {
                   <td style={tdS}>{fmtTime(r.clock_in)}</td>
                   <td style={tdS}>{fmtTime(r.clock_out)}</td>
                   <td style={tdS}>{calcWork(r.clock_in, r.clock_out)}</td>
+                  <td style={tdS}>{getWPName(r.workplace_id)}</td>
                   <td style={tdS}>
                     <span style={{ background: r.status === "working" ? "#d1fae5" : "#dbeafe", color: r.status === "working" ? "#065f46" : "#1e40af", padding: "2px 8px", borderRadius: 6, fontSize: 11, fontWeight: 700 }}>
                       {r.status === "working" ? t("出勤中","출근중") : t("退勤済","퇴근완료")}
