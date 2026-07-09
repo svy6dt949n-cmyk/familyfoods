@@ -61,9 +61,7 @@ function QRScanner({ onScan, onCancel, onError }) {
       jsQRRef.current = window.jsQR;
       startCamera();
     };
-    script.onerror = () => {
-      onError("QRライブラリの読み込みに失敗しました。");
-    };
+    script.onerror = () => onError("QRライブラリの読み込みに失敗しました。");
     document.head.appendChild(script);
 
     async function startCamera() {
@@ -76,9 +74,9 @@ function QRScanner({ onScan, onCancel, onError }) {
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
           videoRef.current.play();
-          videoRef.current.onloadedmetadata = () => { tick(); };
+          videoRef.current.onloadedmetadata = () => tick();
         }
-      } catch (err) {
+      } catch {
         onError("カメラの起動に失敗しました。カメラの許可を確認してください。");
       }
     }
@@ -89,14 +87,12 @@ function QRScanner({ onScan, onCancel, onError }) {
       const canvas = canvasRef.current;
       if (!video || !canvas || !jsQRRef.current) { rafRef.current = requestAnimationFrame(tick); return; }
       if (video.readyState !== video.HAVE_ENOUGH_DATA) { rafRef.current = requestAnimationFrame(tick); return; }
-
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
       const ctx = canvas.getContext("2d");
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
       const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
       const code = jsQRRef.current(imageData.data, imageData.width, imageData.height);
-
       if (code) {
         active = false;
         stopCamera();
@@ -118,29 +114,21 @@ function QRScanner({ onScan, onCancel, onError }) {
     };
   }, []);
 
-  function handleCancel() {
-    if (rafRef.current) cancelAnimationFrame(rafRef.current);
-    if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
-    onCancel();
-  }
-
   return (
-    <div style={{
-      position: "fixed", inset: 0, background: "rgba(0,0,0,0.92)", zIndex: 2000,
-      display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center"
-    }}>
-      <div style={{ color: "#fff", fontSize: 20, fontWeight: 700, marginBottom: 8 }}>
-        📷 QRコードをスキャン
-      </div>
-      <div style={{ color: "#9FE1CB", fontSize: 13, marginBottom: 24 }}>
-        カメラをQRコードに向けてください
-      </div>
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.92)", zIndex: 2000, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+      <div style={{ color: "#fff", fontSize: 20, fontWeight: 700, marginBottom: 8 }}>📷 QRコードをスキャン</div>
+      <div style={{ color: "#9FE1CB", fontSize: 13, marginBottom: 24 }}>カメラをQRコードに向けてください</div>
       <div style={{ position: "relative", width: 300, height: 300, borderRadius: 16, overflow: "hidden", background: "#111" }}>
         <video ref={videoRef} style={{ width: "100%", height: "100%", objectFit: "cover" }} playsInline muted />
-        <div style={{ position: "absolute", inset: 0, border: "2px solid #0F6E56", borderRadius: 16, boxShadow: "inset 0 0 0 60px rgba(0,0,0,0.3)" }}/>
+        <div style={{ position: "absolute", inset: 0, border: "2px solid #0F6E56", borderRadius: 16, boxShadow: "inset 0 0 0 60px rgba(0,0,0,0.3)" }} />
       </div>
       <canvas ref={canvasRef} style={{ display: "none" }} />
-      <button onClick={handleCancel}
+      <button
+        onClick={() => {
+          if (rafRef.current) cancelAnimationFrame(rafRef.current);
+          if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
+          onCancel();
+        }}
         style={{ marginTop: 32, background: "#fff", border: "none", borderRadius: 12, padding: "12px 40px", fontSize: 16, fontWeight: 700, cursor: "pointer", color: "#333" }}>
         キャンセル
       </button>
@@ -181,8 +169,11 @@ export default function QRScan({ employee }) {
   async function handleQRSuccess(qrText) {
     try {
       // 1단계: QR값 검증
-      if (qrText.trim() !== selectedWP.qr_code?.trim()) {
-        setErrorMsg(`QRコードが一致しません。\n正しい ${selectedWP.name} のQRコードをスキャンしてください。`);
+      const scanned = qrText.trim().toUpperCase();
+      const expected = (selectedWP.qr_code || "").trim().toUpperCase();
+
+      if (scanned !== expected) {
+        setErrorMsg(`QRコードが一致しません。\n読み取り値: ${scanned}\n期待値: ${expected}\n正しい ${selectedWP.name} のQRコードをスキャンしてください。`);
         setPhase("error");
         return;
       }
@@ -198,10 +189,10 @@ export default function QRScan({ employee }) {
 
       const { latitude, longitude } = position.coords;
 
-      // 3단계: 거리 계산 (1km 이내)
+      // 3단계: 거리 계산
       if (selectedWP.latitude && selectedWP.longitude) {
         const distance = calcDistance(latitude, longitude, selectedWP.latitude, selectedWP.longitude);
-        const allowed = 1000; // 1km
+        const allowed = selectedWP.radius || 1000;
 
         if (distance > allowed) {
           setErrorMsg(`現在地が ${selectedWP.name} から ${distance}m 離れています。\n${allowed}m 以内で打刻してください。`);
@@ -226,11 +217,6 @@ export default function QRScan({ employee }) {
       }
       setPhase("error");
     }
-  }
-
-  function handleScanError(msg) {
-    setErrorMsg(msg);
-    setPhase("error");
   }
 
   async function processAttendance(actionKey) {
@@ -272,12 +258,8 @@ export default function QRScan({ employee }) {
 
   return (
     <div style={{ maxWidth: 420, margin: "0 auto", fontFamily: "system-ui, sans-serif" }}>
+      {phase === "scanning" && <QRScanner onScan={handleQRSuccess} onCancel={() => setPhase("idle")} onError={msg => { setErrorMsg(msg); setPhase("error"); }} />}
 
-      {phase === "scanning" && (
-        <QRScanner onScan={handleQRSuccess} onCancel={() => setPhase("idle")} onError={handleScanError} />
-      )}
-
-      {/* 헤더 */}
       <div style={{ background: "#0F6E56", padding: "20px 22px 18px", borderRadius: "0 0 22px 22px" }}>
         <div style={{ fontSize: 11, color: "#9FE1CB", letterSpacing: 1, fontWeight: 600 }}>FAMILY FOODS</div>
         <div style={{ fontSize: 26, fontWeight: 700, color: "#fff", marginTop: 4 }}>出退勤</div>
@@ -289,19 +271,14 @@ export default function QRScan({ employee }) {
       </div>
 
       <div style={{ padding: "18px 18px 0" }}>
-        {/* 근무지 선택 */}
         <div style={{ marginBottom: 14 }}>
           <div style={{ fontSize: 12, color: "#5F5E5A", fontWeight: 600, marginBottom: 6 }}>勤務地</div>
-          <select
-            value={selectedWP?.id || ""}
-            onChange={e => setSelectedWP(workplaces.find(w => w.id === e.target.value))}
-            style={{ width: "100%", padding: "12px 16px", fontSize: 15, border: "1.5px solid #D3D1C7", borderRadius: 12 }}
-          >
+          <select value={selectedWP?.id || ""} onChange={e => setSelectedWP(workplaces.find(w => w.id === e.target.value))}
+            style={{ width: "100%", padding: "12px 16px", fontSize: 15, border: "1.5px solid #D3D1C7", borderRadius: 12 }}>
             {workplaces.map(wp => <option key={wp.id} value={wp.id}>{wp.name}</option>)}
           </select>
         </div>
 
-        {/* 버튼 4개 */}
         {phase === "idle" && (
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 14 }}>
             {ACTIONS.map(a => (
@@ -315,7 +292,6 @@ export default function QRScan({ employee }) {
           </div>
         )}
 
-        {/* GPS 확인 중 */}
         {phase === "locating" && (
           <div style={{ background: "#F1EFE8", borderRadius: 20, padding: "30px 18px", textAlign: "center", marginBottom: 14 }}>
             <div style={{ fontSize: 48, marginBottom: 12 }}>📍</div>
@@ -324,7 +300,6 @@ export default function QRScan({ employee }) {
           </div>
         )}
 
-        {/* 처리 중 */}
         {phase === "processing" && (
           <div style={{ background: "#F1EFE8", borderRadius: 20, padding: "30px 18px", textAlign: "center", marginBottom: 14 }}>
             <div style={{ fontSize: 48, marginBottom: 12 }}>⚙️</div>
@@ -332,7 +307,6 @@ export default function QRScan({ employee }) {
           </div>
         )}
 
-        {/* 성공 */}
         {phase === "success" && (
           <div style={{ background: actionMeta(selectedAction)?.bg, borderRadius: 20, padding: "30px 18px", textAlign: "center", marginBottom: 14 }}>
             <div style={{ fontSize: 56 }}>{actionMeta(selectedAction)?.icon}</div>
@@ -344,7 +318,6 @@ export default function QRScan({ employee }) {
           </div>
         )}
 
-        {/* 에러 */}
         {phase === "error" && (
           <div style={{ background: "#FCEBEB", borderRadius: 20, padding: "24px 18px", textAlign: "center", marginBottom: 14, border: "1.5px solid #f87171" }}>
             <div style={{ fontSize: 40, marginBottom: 12 }}>⚠️</div>
@@ -356,7 +329,6 @@ export default function QRScan({ employee }) {
           </div>
         )}
 
-        {/* 오늘 기록 */}
         {history.length > 0 && phase !== "scanning" && (
           <div>
             <div style={{ fontSize: 13, fontWeight: 700, color: "#5F5E5A", marginBottom: 10 }}>本日の記録</div>
