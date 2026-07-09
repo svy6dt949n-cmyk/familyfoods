@@ -27,6 +27,17 @@ function fmtTime(date) {
   });
 }
 
+function calcDistance(lat1, lng1, lat2, lng2) {
+  const R = 6371000;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLng = (lng2 - lng1) * Math.PI / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLng / 2) * Math.sin(dLng / 2);
+  return Math.round(6371000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
+}
+
 const ACTIONS = [
   { key: "clock_in",      label: "出勤",     icon: "🟢", color: "#0F6E56", bg: "#E1F5EE" },
   { key: "outside_start", label: "外出",     icon: "🟡", color: "#854F0B", bg: "#FAEEDA" },
@@ -44,7 +55,6 @@ function QRScanner({ onScan, onCancel, onError }) {
   useEffect(() => {
     let active = true;
 
-    // jsQR 동적 로드
     const script = document.createElement("script");
     script.src = "https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js";
     script.onload = () => {
@@ -126,24 +136,12 @@ function QRScanner({ onScan, onCancel, onError }) {
         カメラをQRコードに向けてください
       </div>
       <div style={{ position: "relative", width: 300, height: 300, borderRadius: 16, overflow: "hidden", background: "#111" }}>
-        <video
-          ref={videoRef}
-          style={{ width: "100%", height: "100%", objectFit: "cover" }}
-          playsInline
-          muted
-        />
-        {/* 스캔 가이드 선 */}
-        <div style={{
-          position: "absolute", inset: 0, border: "2px solid #0F6E56", borderRadius: 16,
-          boxShadow: "inset 0 0 0 60px rgba(0,0,0,0.3)"
-        }}/>
+        <video ref={videoRef} style={{ width: "100%", height: "100%", objectFit: "cover" }} playsInline muted />
+        <div style={{ position: "absolute", inset: 0, border: "2px solid #0F6E56", borderRadius: 16, boxShadow: "inset 0 0 0 60px rgba(0,0,0,0.3)" }}/>
       </div>
       <canvas ref={canvasRef} style={{ display: "none" }} />
       <button onClick={handleCancel}
-        style={{
-          marginTop: 32, background: "#fff", border: "none", borderRadius: 12,
-          padding: "12px 40px", fontSize: 16, fontWeight: 700, cursor: "pointer", color: "#333"
-        }}>
+        style={{ marginTop: 32, background: "#fff", border: "none", borderRadius: 12, padding: "12px 40px", fontSize: 16, fontWeight: 700, cursor: "pointer", color: "#333" }}>
         キャンセル
       </button>
     </div>
@@ -182,17 +180,50 @@ export default function QRScan({ employee }) {
 
   async function handleQRSuccess(qrText) {
     try {
-      setPhase("processing");
-
+      // 1단계: QR값 검증
       if (qrText.trim() !== selectedWP.qr_code?.trim()) {
         setErrorMsg(`QRコードが一致しません。\n正しい ${selectedWP.name} のQRコードをスキャンしてください。`);
         setPhase("error");
         return;
       }
 
+      // 2단계: GPS 위치 확인
+      setPhase("locating");
+
+      const position = await new Promise((resolve, reject) =>
+        navigator.geolocation.getCurrentPosition(resolve, reject, {
+          enableHighAccuracy: true, timeout: 15000, maximumAge: 0,
+        })
+      );
+
+      const { latitude, longitude } = position.coords;
+
+      // 3단계: 거리 계산 (1km 이내)
+      if (selectedWP.latitude && selectedWP.longitude) {
+        const distance = calcDistance(latitude, longitude, selectedWP.latitude, selectedWP.longitude);
+        const allowed = 1000; // 1km
+
+        if (distance > allowed) {
+          setErrorMsg(`現在地が ${selectedWP.name} から ${distance}m 離れています。\n${allowed}m 以内で打刻してください。`);
+          setPhase("error");
+          return;
+        }
+      }
+
+      // 4단계: 출퇴근 처리
+      setPhase("processing");
       await processAttendance(selectedAction);
+
     } catch (err) {
-      setErrorMsg("エラーが発生しました: " + (err?.message || String(err)));
+      if (err?.code === 1) {
+        setErrorMsg("位置情報の許可が必要です。\nブラウザの設定から位置情報を許可してください。");
+      } else if (err?.code === 2) {
+        setErrorMsg("GPS信号を取得できませんでした。\n屋外で再度お試しください。");
+      } else if (err?.code === 3) {
+        setErrorMsg("GPS取得がタイムアウトしました。\nもう一度お試しください。");
+      } else {
+        setErrorMsg("エラーが発生しました: " + (err?.message || String(err)));
+      }
       setPhase("error");
     }
   }
@@ -243,11 +274,7 @@ export default function QRScan({ employee }) {
     <div style={{ maxWidth: 420, margin: "0 auto", fontFamily: "system-ui, sans-serif" }}>
 
       {phase === "scanning" && (
-        <QRScanner
-          onScan={handleQRSuccess}
-          onCancel={() => setPhase("idle")}
-          onError={handleScanError}
-        />
+        <QRScanner onScan={handleQRSuccess} onCancel={() => setPhase("idle")} onError={handleScanError} />
       )}
 
       {/* 헤더 */}
@@ -285,6 +312,15 @@ export default function QRScan({ employee }) {
                 <div style={{ fontSize: 11, color: "#888", marginTop: 4 }}>QRスキャン</div>
               </button>
             ))}
+          </div>
+        )}
+
+        {/* GPS 확인 중 */}
+        {phase === "locating" && (
+          <div style={{ background: "#F1EFE8", borderRadius: 20, padding: "30px 18px", textAlign: "center", marginBottom: 14 }}>
+            <div style={{ fontSize: 48, marginBottom: 12 }}>📍</div>
+            <div style={{ fontSize: 16, color: "#5F5E5A", fontWeight: 600 }}>GPS位置確認中...</div>
+            <div style={{ fontSize: 12, color: "#888", marginTop: 8 }}>現在地を確認しています</div>
           </div>
         )}
 
