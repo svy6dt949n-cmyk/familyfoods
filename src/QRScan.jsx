@@ -184,7 +184,7 @@ export default function QRScan({ employee }) {
     try {
       setPhase("processing");
 
-      if (false) {
+      if (qrText.trim() !== selectedWP.qr_code?.trim()) {
         setErrorMsg(`QRコードが一致しません。\n正しい ${selectedWP.name} のQRコードをスキャンしてください。`);
         setPhase("error");
         return;
