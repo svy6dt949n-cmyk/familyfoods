@@ -1,7 +1,5 @@
-import { useState, useCallback, useEffect } from "react";
-import QRScan from "./QRScan";
-import MainMenu from "./MainMenu";
-import AdminAttendanceView from "./AdminAttendanceView";
+﻿import { useState, useCallback, useEffect, useRef } from "react";
+import { Html5Qrcode } from "html5-qrcode";
 
 const SUPA_URL = import.meta.env.VITE_SUPABASE_URL;
 const SUPA_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -31,6 +29,10 @@ const db = {
   addRequest: (req) => sbFetch("/requests", { method:"POST", body: JSON.stringify(req) }),
   updateRequest: (id, data) => sbFetch(`/requests?id=eq.${id}`, { method:"PATCH", body: JSON.stringify(data) }),
   deleteRequest: (id) => sbFetch(`/requests?id=eq.${id}`, { method:"DELETE" }),
+  getWorkplaces: () => sbFetch("/workplaces?order=name"),
+  getTodayAttendance: (empId, dateStr) => sbFetch(`/attendance_records?employee_id=eq.${empId}&work_date=eq.${dateStr}`),
+  addAttendanceRow: (rec) => sbFetch("/attendance_records", { method:"POST", body: JSON.stringify(rec) }),
+  updateAttendanceRow: (id, data) => sbFetch(`/attendance_records?id=eq.${id}`, { method:"PATCH", body: JSON.stringify(data) }),
 };
 
 const JP_HOLIDAYS = {
@@ -54,7 +56,7 @@ const DAYOFF_NUM={月:1,水:3,土:6};
 const DEPT_OPTIONS=["営業","開発","デザイン","総務","経理","人事","その他"];
 const LS_LOGIN="ff_login_id";
 const LS_LANG="ff_lang";
-const APP_VER="2.2";
+const APP_VER="2.1";
 
 // 색상 정의
 const COLOR = {
@@ -71,6 +73,23 @@ function isHoliday(ds){return !!JP_HOLIDAYS[ds];}
 function isOff(ds){return new Date(ds).getDay()===0||isHoliday(ds);}
 function dayColor(ds){const d=new Date(ds).getDay();return d===0?{color:"#ef4444"}:d===6?{color:"#3b82f6"}:{};}
 function makeAvatar(name){return name?name.trim().charAt(0):"?";}
+function distanceMeters(lat1, lon1, lat2, lon2) {
+  const R = 6371000;
+  const toRad = (v) => (v * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+function todayStr() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+const MAX_DISTANCE_METERS = 500;
 
 // 연휴 전후 체크 (전날 또는 다음날이 공휴일/일요일인지)
 function isNearHoliday(ds){
@@ -92,7 +111,6 @@ export default function App(){
   const [submitting,setSubmitting]=useState(false);
   const [year,setYear]=useState(2026);
   const [month,setMonth]=useState(5);
-  const [page,setPage]=useState("menu"); // menu | calendar | attendance
 
   const t=useCallback((ja,ko)=>lang==="ja"?ja:ko,[lang]);
   function setLang(l){setLangState(l);try{localStorage.setItem(LS_LANG,l);}catch(e){}}
@@ -123,9 +141,8 @@ export default function App(){
     if(!acc){showToast(t("IDまたはパスワードが違います","ID 또는 비밀번호가 틀립니다"),"error");return;}
     try{localStorage.setItem(LS_LOGIN,acc.login_id);}catch(e){}
     setLoggedIn(acc);
-    setPage("menu");
   }
-  function logout(){try{localStorage.removeItem(LS_LOGIN);}catch(e){}setLoggedIn(null);setPage("menu");}
+  function logout(){try{localStorage.removeItem(LS_LOGIN);}catch(e){}setLoggedIn(null);}
 
   async function changePassword(userId,newPassword){
     try{
@@ -169,7 +186,7 @@ export default function App(){
       await db.updateEmployee(id,u);
       setEmployees(p=>p.map(e=>e.id===id?{...e,...u}:e));
       showToast(t("更新しました","업데이트 완료"));return true;
-    }catch(e){showToast(t("エラーが発生しました","오류 발생"),"error");return false;}
+    }catch(e){showToast(t("エラーが発생しました","오류 발생"),"error");return false;}
   }
 
   async function deleteEmployee(id){
@@ -235,7 +252,7 @@ export default function App(){
       await db.updateRequest(id,{status:"rejected"});
       setRequests(p=>p.map(r=>r.id===id?{...r,status:"rejected"}:r));
       showToast(t("却下しました","반려 완료"),"warn");
-    }catch(e){showToast(t("エラーが発生しました","오류 발생"),"error");}
+    }catch(e){showToast(t("エラーが発생しました","오류 발생"),"error");}
   }
 
   async function cancel(id){
@@ -273,6 +290,7 @@ export default function App(){
       if(isOff(ds)) continue;
       const absent=requests.filter(r=>r.date===ds&&r.status==="approved").length;
       const threshold=Math.ceil(empCount/3);
+      // 1/3 이상 또는 연휴 전후에 2명 이상
       if(absent>=threshold||(isNearHoliday(ds)&&absent>=2)) w.push(ds);
     }
     return w;
@@ -326,44 +344,15 @@ export default function App(){
       )}
       {loggedIn&&!currentEmp?.must_change_password&&(
         <>
-          <Header lang={lang} setLang={setLang} t={t} user={currentEmp} onLogout={logout}
-            page={page} setPage={setPage}/>
+          <Header lang={lang} setLang={setLang} t={t} user={currentEmp} onLogout={logout}/>
           <main style={S.main}>
-            {page==="menu"&&<MainMenu onSelect={setPage}/>}
-
-            {page==="attendance"&&(
-              <div>
-                <button
-                  onClick={()=>setPage("menu")}
-                  style={{ margin: "0 0 16px", padding: "8px 16px", border: "1px solid #D3D1C7", borderRadius: 10, background: "#fff", cursor: "pointer" }}
-                >
-                  ← {t("メニューに戻る","메뉴로 돌아가기")}
-                </button>
-                {loggedIn.role==="admin" ? (
-  <AttendanceAdminTabs lang={lang} t={t} employees={employees} currentEmp={currentEmp}/>
-) : (
-  <QRScan employee={currentEmp}/>
-)}
-              </div>
-            )}
-
-            {page==="calendar"&&(
-              <>
-                <button
-                  onClick={()=>setPage("menu")}
-                  style={{ margin: "0 0 16px", padding: "8px 16px", border: "1px solid #D3D1C7", borderRadius: 10, background: "#fff", cursor: "pointer" }}
-                >
-                  ← {t("メニューに戻る","메뉴로 돌아가기")}
-                </button>
-                {loggedIn.role==="admin"
-                  ? <AdminView {...shared} allAccounts={employees}
-                      addEmployee={addEmployee} updateEmployee={updateEmployee}
-                      deleteEmployee={deleteEmployee} resetPassword={resetPassword}/>
-                  : <EmployeeView {...shared} currentUser={currentEmp}
-                      onChangePassword={(pw)=>changePassword(currentEmp.id,pw)}/>
-                }
-              </>
-            )}
+            {loggedIn.role==="admin"
+              ? <AdminView {...shared} allAccounts={employees}
+                  addEmployee={addEmployee} updateEmployee={updateEmployee}
+                  deleteEmployee={deleteEmployee} resetPassword={resetPassword}/>
+              : <EmployeeView {...shared} currentUser={currentEmp}
+                  onChangePassword={(pw)=>changePassword(currentEmp.id,pw)}/>
+            }
           </main>
         </>
       )}
@@ -372,30 +361,6 @@ export default function App(){
 }
 
 // ── 공통 로고 ─────────────────────────────────────────────────────
-function AttendanceAdminTabs({lang,t,employees,currentEmp}){
-  const [sub,setSub]=useState("check");
-  return (
-    <div>
-      <div style={{display:"flex",gap:8,marginBottom:16}}>
-        <button onClick={()=>setSub("check")}
-          style={{padding:"8px 16px",border:"1px solid #D3D1C7",borderRadius:10,
-            background:sub==="check"?"#6366f1":"#fff",color:sub==="check"?"#fff":"#374151",
-            fontWeight:700,cursor:"pointer"}}>
-          📱 {t("QRチェックイン","QR체크인")}
-        </button>
-        <button onClick={()=>setSub("manage")}
-          style={{padding:"8px 16px",border:"1px solid #D3D1C7",borderRadius:10,
-            background:sub==="manage"?"#6366f1":"#fff",color:sub==="manage"?"#fff":"#374151",
-            fontWeight:700,cursor:"pointer"}}>
-          📋 {t("出退勤管理","출퇴근관리")}
-        </button>
-      </div>
-      {sub==="check"
-        ? <QRScan employee={currentEmp}/>
-        : <AdminAttendanceView lang={lang} t={t} employees={employees.filter(e=>e.role==="employee")}/>}
-    </div>
-  );
-}
 function SmileLogo({size=52}){
   return (
     <svg width={size} height={size} viewBox="0 0 64 64" fill="none">
@@ -515,10 +480,10 @@ function ForceChangePw({lang,t,user,onSave,onLogout}){
 // ══════════════════════════════════════════════════════════════════
 // HEADER
 // ══════════════════════════════════════════════════════════════════
-function Header({lang,setLang,t,user,onLogout,page,setPage}){
+function Header({lang,setLang,t,user,onLogout}){
   return (
     <header style={S.header}>
-      <div style={{...S.logo,cursor:"pointer"}} onClick={()=>setPage&&setPage("menu")}>
+      <div style={S.logo}>
         <div style={S.logoIcon}><SmileLogo size={28}/></div>
         <div><FamilyFoodsText size={14}/><div style={S.logoSub}>{t("勤怠管理システム","근태관리 시스템")}</div></div>
       </div>
@@ -542,9 +507,61 @@ function Header({lang,setLang,t,user,onLogout,page,setPage}){
 // EMPLOYEE VIEW
 // ══════════════════════════════════════════════════════════════════
 function EmployeeView({lang,t,currentUser,employees,requests,year,month,prevMonth,nextMonth,
-  daysInMonth,firstDay,dayLabels,warn,getApproved,getMyReq,submitRequest,cancel,onChangePassword}){
+ daysInMonth,firstDay,dayLabels,warn,getApproved,getMyReq,submitRequest,cancel,onChangePassword,showToast}){
   const [modal,setModal]=useState(null);
   const [showChgPw,setShowChgPw]=useState(false);
+  const [showAttendance,setShowAttendance]=useState(false);
+  const [workplaces,setWorkplaces]=useState([]);
+  const [todayRow,setTodayRow]=useState(null);
+  const [outsideStartedAt,setOutsideStartedAt]=useState(null);
+
+  useEffect(()=>{
+    db.getWorkplaces().then(setWorkplaces).catch(()=>{});
+    refreshTodayRow();
+  },[]);
+
+  async function refreshTodayRow(){
+    try{
+      const rows = await db.getTodayAttendance(currentUser.id, todayStr());
+      setTodayRow(rows[0] || null);
+    }catch(e){}
+  }
+
+  async function handleAttendanceAction(actionType, workplaceId){
+    try{
+      if(actionType==="出勤"){
+        const res = await db.addAttendanceRow({
+          employee_id: currentUser.id,
+          workplace_id: workplaceId,
+          work_date: todayStr(),
+          clock_in: new Date().toISOString(),
+        });
+        setTodayRow(res[0]);
+        showToast(t("出勤しました","출근 처리되었습니다"));
+      } else if(actionType==="外出"){
+        setOutsideStartedAt(new Date());
+        showToast(t("外出しました","외출 처리되었습니다"));
+      } else if(actionType==="外出戻り"){
+        if(outsideStartedAt && todayRow){
+          const minutes = Math.round((new Date() - outsideStartedAt) / 60000);
+          const newOutside = (todayRow.outside_minutes||0) + minutes;
+          await db.updateAttendanceRow(todayRow.id, { outside_minutes: newOutside });
+          setTodayRow(p=>({...p, outside_minutes: newOutside}));
+          setOutsideStartedAt(null);
+          showToast(t("戻りました","외출복귀 처리되었습니다"));
+        }
+      } else if(actionType==="退勤"){
+        if(todayRow){
+          const nowIso = new Date().toISOString();
+          await db.updateAttendanceRow(todayRow.id, { clock_out: nowIso });
+          setTodayRow(p=>({...p, clock_out: nowIso}));
+          showToast(t("退勤しました","퇴근 처리되었습니다"));
+        }
+      }
+    }catch(e){
+      showToast(t("エラーが発生しました","오류가 발생했습니다"),"error");
+    }
+  }
   const myReqs=requests.filter(r=>r.emp_id===currentUser.id).sort((a,b)=>a.date.localeCompare(b.date));
   const usedPaid=myReqs.filter(r=>r.type==="有給休暇"&&r.status==="approved").reduce((s,r)=>s+(r.half?0.5:1),0);
 
@@ -554,6 +571,10 @@ function EmployeeView({lang,t,currentUser,employees,requests,year,month,prevMont
   return (
     <div style={S.empLayout}>
       <aside style={S.sidebar}>
+        <button style={{...S.primaryBtn,width:"100%",background:"linear-gradient(135deg,#059669,#10b981)"}}
+          onClick={()=>setShowAttendance(true)}>
+          📷 {t("出退勤チェック","출퇴근 체크")}
+        </button>
         <div style={S.card}>
           <div style={S.bigAv}>{currentUser.avatar}</div>
           <div style={S.empName}>{lang==="ja"?currentUser.name:currentUser.name_ko}</div>
@@ -642,6 +663,7 @@ function EmployeeView({lang,t,currentUser,employees,requests,year,month,prevMont
                   <div style={{display:"flex",gap:2}}>
                     {isHoliday(ds)&&<span style={S.holTag}>{JP_HOLIDAYS[ds]?.slice(0,2)}</span>}
                     {w&&!isOff(ds)&&<span title={t("人員不足注意","인원부족 주의")} style={{fontSize:12}}>⚠️</span>}
+
                   </div>
                 </div>
                 {/* 본인 신청 표시 */}
@@ -680,6 +702,12 @@ function EmployeeView({lang,t,currentUser,employees,requests,year,month,prevMont
         onSubmit={f=>{submitRequest(f);setModal(null);}} onClose={()=>setModal(null)}/>}
       {showChgPw&&<ChangePwModal t={t} user={currentUser}
         onSave={onChangePassword} onClose={()=>setShowChgPw(false)}/>}
+        {showAttendance&&(
+        <AttendanceCheckModal t={t} currentUser={currentUser} workplaces={workplaces}
+          todayRow={todayRow} outsideStartedAt={outsideStartedAt}
+          onSuccess={(actionType,workplaceId)=>handleAttendanceAction(actionType,workplaceId)}
+          onClose={()=>{setShowAttendance(false); refreshTodayRow();}}/>
+      )}
     </div>
   );
 }
@@ -689,12 +717,12 @@ function EmployeeView({lang,t,currentUser,employees,requests,year,month,prevMont
 // ══════════════════════════════════════════════════════════════════
 function AdminView({lang,t,employees,allAccounts,requests,year,month,prevMonth,nextMonth,
   daysInMonth,firstDay,dayLabels,warn,getApproved,getAllForDate,approve,reject,
-  downloadCSV,pendingList,addEmployee,updateEmployee,deleteEmployee,resetPassword,loadData,showToast}){
+  downloadCSV,pendingList,addEmployee,updateEmployee,deleteEmployee,resetPassword,loadData}){
   const [tab,setTab]=useState("calendar");
   const [filter,setFilter]=useState("all");
   const [dayModal,setDayModal]=useState(null);
-  const [adminAddModal,setAdminAddModal]=useState(null);
-  const [editReqModal,setEditReqModal]=useState(null);
+  const [adminAddModal,setAdminAddModal]=useState(null); // {date} 관리자 직접 지정
+  const [editReqModal,setEditReqModal]=useState(null); // 기존 신청 변경
   const statusColor={approved:"#10b981",pending:"#f59e0b",rejected:"#ef4444"};
   const statusLabel={approved:t("承認済","승인"),pending:t("審査中","심사중"),rejected:t("却下","반려")};
   const empOnly=employees.filter(e=>e.role==="employee");
@@ -726,6 +754,7 @@ function AdminView({lang,t,employees,allAccounts,requests,year,month,prevMonth,n
             {warn.map(w=><span key={w} style={S.warnDate}>{w.slice(5)}</span>)}
           </div>)}
 
+          {/* 범례 */}
           <div style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:12}}>
             {[
               {bg:COLOR.sentaku.bg,tc:COLOR.sentaku.text,label:t("選択休暇","선택휴무")},
@@ -752,6 +781,7 @@ function AdminView({lang,t,employees,allAccounts,requests,year,month,prevMonth,n
               return (
                 <div key={ds} style={{...S.dayCell,...(isOff(ds)?S.dayCellOff:{}),
                   ...(w?{border:"2px solid #f59e0b",background:"#fffbeb"}:{}),
+
                   minHeight:90,cursor:isOff(ds)?"default":"pointer"}}
                   onClick={()=>!isOff(ds)&&setDayModal({date:ds,reqs:all})}>
                   <div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}>
@@ -761,6 +791,7 @@ function AdminView({lang,t,employees,allAccounts,requests,year,month,prevMonth,n
                       {w&&<span style={{fontSize:11}}>⚠️</span>}
                     </div>
                   </div>
+                  {/* 승인된 직원 이름 표시 */}
                   {appr.slice(0,2).map(r=>{
                     const emp=employees.find(a=>a.id===r.emp_id);
                     const cs=getChipStyle(r);
@@ -858,10 +889,10 @@ function AdminView({lang,t,employees,allAccounts,requests,year,month,prevMonth,n
         )}
 
         {tab==="attendance"&&(
-          <AttendanceTab lang={lang} t={t} employees={employees} workplaces={employees.length > 0 ? [] : []}/>
-        )}
+  <AttendanceTab lang={lang} t={t} employees={employees}/>
+)}
 
-        {tab==="stats"&&(<>
+{tab==="stats"&&(<>
           <h3 style={S.secTitle}>{t("社員別休暇統計","직원별 휴가 통계")}</h3>
           <div style={S.statsGrid}>
             {empOnly.map(emp=>{
@@ -906,6 +937,7 @@ function AdminView({lang,t,employees,allAccounts,requests,year,month,prevMonth,n
         </>)}
       </div>
 
+      {/* 날짜 상세 모달 */}
       {dayModal&&(
         <div style={S.overlay} onClick={()=>setDayModal(null)}>
           <div style={S.modalBox} onClick={e=>e.stopPropagation()}>
@@ -958,6 +990,7 @@ function AdminView({lang,t,employees,allAccounts,requests,year,month,prevMonth,n
                 </div>
               );
             })}
+            {/* 관리자 직접 지정 버튼 */}
             <div style={{borderTop:"1px solid #e2e8f0",marginTop:12,paddingTop:12}}>
               <button style={{...S.primaryBtn,width:"100%",background:"linear-gradient(135deg,#059669,#10b981)",marginBottom:8}}
                 onClick={()=>{setDayModal(null);setAdminAddModal({date:dayModal.date});}}>
@@ -969,6 +1002,7 @@ function AdminView({lang,t,employees,allAccounts,requests,year,month,prevMonth,n
         </div>
       )}
 
+      {/* 관리자 직접 선택휴무/유급 지정 모달 */}
       {adminAddModal&&(
         <div style={S.overlay} onClick={()=>setAdminAddModal(null)}>
           <div style={{...S.modalBox,maxWidth:420}} onClick={e=>e.stopPropagation()}>
@@ -991,14 +1025,15 @@ function AdminView({lang,t,employees,allAccounts,requests,year,month,prevMonth,n
                   }
                   window.location.reload();
                   setAdminAddModal(null);
-                  showToast&&showToast(t("直接指定しました","직접 지정 완료"));
-                }catch(e){showToast&&showToast("エラー: "+e.message,"error");}
+                  showToast(t("直接指定しました","직접 지정 완료"));
+                }catch(e){showToast("エラー: "+e.message,"error");}
               }}
               onClose={()=>setAdminAddModal(null)}
             />
           </div>
         </div>
       )}
+      {/* 기존 신청 변경 모달 */}
       {editReqModal&&(
         <div style={S.overlay} onClick={()=>setEditReqModal(null)}>
           <div style={{...S.modalBox,maxWidth:420}} onClick={e=>e.stopPropagation()}>
@@ -1008,19 +1043,22 @@ function AdminView({lang,t,employees,allAccounts,requests,year,month,prevMonth,n
               employees={employees}
               onSave={async(newType,newDate,newHalf)=>{
                 try{
+                  // 기존 유급이면 복원
                   if(editReqModal.status==="approved"&&editReqModal.type==="有給休暇"){
                     const emp=employees.find(e=>e.id===editReqModal.emp_id);
                     const restore=(editReqModal.half?0.5:1);
                     await db.updateEmployee(editReqModal.emp_id,{remaining_paid_leave:(emp?.remaining_paid_leave||0)+restore});
                   }
+                  // 새로 저장
                   await db.updateRequest(editReqModal.id,{type:newType,date:newDate,half:newHalf});
+                  // 새 유급이면 차감
                   if(editReqModal.status==="approved"&&newType==="有給休暇"){
                     const emp=employees.find(e=>e.id===editReqModal.emp_id);
                     const dec=newHalf?0.5:1;
                     await db.updateEmployee(editReqModal.emp_id,{remaining_paid_leave:Math.max(0,(emp?.remaining_paid_leave||0)-dec)});
                   }
                   window.location.reload();
-                }catch(e){showToast&&showToast("エラー: "+e.message,"error");}
+                }catch(e){showToast("エラー: "+e.message,"error");}
               }}
               onClose={()=>setEditReqModal(null)}
             />
@@ -1041,6 +1079,7 @@ function EditReqForm({t,req,employees,onSave,onClose}){
   const [half,setHalf]=useState(req.half||false);
   return (
     <div>
+      {/* 직원 정보 */}
       <div style={{background:"#f8fafc",borderRadius:10,padding:"10px 14px",marginBottom:16,
         display:"flex",alignItems:"center",gap:10}}>
         <div style={S.smAv}>{emp?.avatar}</div>
@@ -1167,8 +1206,9 @@ function MembersTab({lang,t,employees,addEmployee,updateEmployee,deleteEmployee,
   const [showPw,setShowPw]=useState(false);
   const [visiblePwIds,setVisiblePwIds]=useState({});
   function togglePw(id){setVisiblePwIds(p=>({...p,[id]:!p[id]}));}
-  const [schedModal,setSchedModal]=useState(null);
-  const [leaveModal,setLeaveModal]=useState(null);
+  // 관리자 직접 조작
+  const [schedModal,setSchedModal]=useState(null); // {emp} 직원 대신 신청
+  const [leaveModal,setLeaveModal]=useState(null); // {emp} 유급 수정
   const [newLeave,setNewLeave]=useState(0);
   function openAdd(){setForm(EMPTY);setEditId(null);setShowForm(true);}
   function openEdit(emp){
@@ -1190,7 +1230,7 @@ function MembersTab({lang,t,employees,addEmployee,updateEmployee,deleteEmployee,
         <button style={S.primaryBtn} onClick={openAdd}>+ {t("社員を追加","직원 추가")}</button>
       </div>
       <div style={{display:"flex",flexDirection:"column",gap:10}}>
-        {employees.length===0&&<div style={S.empty}>{t("社員がいません","직원이 없습니다")}</div>}
+        {employees.length===0&&<div style={S.empty}>{t("社員がいません","등록된 직원이 없습니다")}</div>}
         {employees.map(emp=>(
           <div key={emp.id} style={S.memberRow}>
             <div style={{display:"flex",gap:12,alignItems:"center",flex:1}}>
@@ -1200,7 +1240,7 @@ function MembersTab({lang,t,employees,addEmployee,updateEmployee,deleteEmployee,
                   <span style={{fontWeight:700,fontSize:14}}>{lang==="ja"?emp.name:emp.name_ko}</span>
                   {emp.must_change_password
                     ?<span style={{...S.rolePill,background:"#fef3c7",color:"#92400e",fontSize:10}}>{t("仮PW","임시PW")}</span>
-                    :<span style={{...S.rolePill,background:"#d1fae5",color:"#065f46",fontSize:10}}>{t("PW変更済","PW변경됨")}</span>}
+                    :<span style={{...S.rolePill,background:"#d1fae5",color:"#065f46",fontSize:10}}>{t("PW変更済","PW변경")}</span>}
                 </div>
                 <div style={{fontSize:12,color:"#6b7280",marginTop:2}}>
                   {emp.dept} ·
@@ -1208,7 +1248,7 @@ function MembersTab({lang,t,employees,addEmployee,updateEmployee,deleteEmployee,
                     fontSize:10,padding:"0 5px",borderRadius:4,marginLeft:4,fontWeight:700}}>
                     {emp.selected_day_off}曜
                   </span>
-                  · {t("有給残","잔여유급")}: {emp.remaining_paid_leave}{t("日","일")}
+                  · {t("有給残","잔여")}: {emp.remaining_paid_leave}{t("日","일")}
                 </div>
                 <div style={{display:"flex",alignItems:"center",gap:10,marginTop:4,flexWrap:"wrap"}}>
                   <span style={{fontSize:11,color:"#9ca3af"}}>ID: <code style={S.code}>{emp.login_id}</code></span>
@@ -1223,11 +1263,11 @@ function MembersTab({lang,t,employees,addEmployee,updateEmployee,deleteEmployee,
               </div>
             </div>
             <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-              <button style={S.editBtn} onClick={()=>openEdit(emp)}>✏️</button>
+              <button style={S.editBtn} onClick={()=>openEdit(emp)}>✏</button>
               <button style={{...S.editBtn,background:"#f3e8ff",color:"#7e22ce"}}
                 onClick={()=>{setResetModal(emp);setNewTempPw("temp1234");}}>🔑</button>
               <button style={{...S.editBtn,background:"#dcfce7",color:"#166534"}}
-                onClick={()=>setSchedModal(emp)} title={t("休暇を代わりに登録","휴가 대리 등록")}>📅</button>
+                onClick={()=>setSchedModal(emp)} title={t("休暇を代わりに登録","휴가 직접 등록")}>📅</button>
               <button style={{...S.editBtn,background:"#fef9c3",color:"#854d0e"}}
                 onClick={()=>{setLeaveModal(emp);setNewLeave(emp.remaining_paid_leave);}}
                 title={t("有給日数を修正","유급일수 수정")}>✏️有給</button>
@@ -1240,12 +1280,12 @@ function MembersTab({lang,t,employees,addEmployee,updateEmployee,deleteEmployee,
       {showForm&&(
         <div style={S.overlay} onClick={()=>setShowForm(false)}>
           <div style={{...S.modalBox,maxWidth:520}} onClick={e=>e.stopPropagation()}>
-            <h3 style={S.modalTitle}>{editId!==null?t("社員情報を編集","직원 정보 수정"):t("新しい社員を追加","새 직원 추가")}</h3>
+            <h3 style={S.modalTitle}>{editId!==null?t("社員情報を編集","직원 정보 편집"):t("新しい社員を追加","새 직원 추가")}</h3>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
-              <Field label={t("氏名（日本語）","이름(일본어)")} req>
+              <Field label={t("氏名（日本語）","이름（일본어）")} req>
                 <input style={S.input} value={form.name} onChange={e=>setForm(f=>({...f,name:e.target.value}))} placeholder="田中 健太"/>
               </Field>
-              <Field label={t("氏名（韓国語）","이름(한국어)")}>
+              <Field label={t("氏名（韓国語）","이름（한국어）")}>
                 <input style={S.input} value={form.nameKo} onChange={e=>setForm(f=>({...f,nameKo:e.target.value}))} placeholder="다나카 켄타"/>
               </Field>
               <Field label={t("ログインID","로그인 ID")} req>
@@ -1257,7 +1297,7 @@ function MembersTab({lang,t,employees,addEmployee,updateEmployee,deleteEmployee,
                     type={showPw?"text":"password"} onChange={e=>setForm(f=>({...f,tempPassword:e.target.value}))}/>
                   <button style={S.eyeBtn} onClick={()=>setShowPw(v=>!v)}>{showPw?"🙈":"👁"}</button>
                 </div>
-                <div style={{fontSize:10,color:"#9ca3af",marginTop:3}}>{t("初回ログイン時に変更が求められます","첫 로그인 시 변경이 필요합니다")}</div>
+                <div style={{fontSize:10,color:"#9ca3af",marginTop:3}}>{t("初回ログイン時に変更が求められます","첫 로그인 시 변경 요구")}</div>
               </Field>
               <Field label={t("部署","부서")}>
                 <select style={S.input} value={form.dept} onChange={e=>setForm(f=>({...f,dept:e.target.value}))}>
@@ -1313,7 +1353,7 @@ function MembersTab({lang,t,employees,addEmployee,updateEmployee,deleteEmployee,
           <div style={{...S.modalBox,maxWidth:360}} onClick={e=>e.stopPropagation()}>
             <h3 style={{...S.modalTitle,color:"#ef4444"}}>🗑 {t("本当に削除しますか？","정말 삭제할까요?")}</h3>
             <p style={{fontSize:14,color:"#374151",marginBottom:20}}>
-              <strong>{lang==="ja"?confirmDel.name:confirmDel.name_ko}</strong>{t("さんを削除します。","님을 삭제합니다.")}
+              <strong>{lang==="ja"?confirmDel.name:confirmDel.name_ko}</strong>{t("さんを削除します。","을 삭제합니다.")}
             </p>
             <div style={{display:"flex",gap:8}}>
               <button style={{...S.rejectBtn,padding:"10px 20px",fontSize:14}}
@@ -1326,6 +1366,7 @@ function MembersTab({lang,t,employees,addEmployee,updateEmployee,deleteEmployee,
         </div>
       )}
 
+      {/* ── 관리자 직접 휴가 등록 모달 ── */}
       {schedModal&&(
         <AdminSchedModal t={t} lang={lang} emp={schedModal}
           requests={requests}
@@ -1340,6 +1381,7 @@ function MembersTab({lang,t,employees,addEmployee,updateEmployee,deleteEmployee,
           onClose={()=>setSchedModal(null)}/>
       )}
 
+      {/* ── 유급 일수 직접 수정 모달 ── */}
       {leaveModal&&(
         <div style={S.overlay} onClick={()=>setLeaveModal(null)}>
           <div style={{...S.modalBox,maxWidth:360}} onClick={e=>e.stopPropagation()}>
@@ -1353,7 +1395,7 @@ function MembersTab({lang,t,employees,addEmployee,updateEmployee,deleteEmployee,
               </div>
             </div>
             <div style={S.fg}>
-              <label style={S.fl}>{t("新しい有給残日数","새 잔여유급")}</label>
+              <label style={S.fl}>{t("新しい有給残日数","새 잔여 유급일수")}</label>
               <input style={S.input} type="number" min="0" max="40" value={newLeave}
                 onChange={e=>setNewLeave(e.target.value)}/>
             </div>
@@ -1371,7 +1413,7 @@ function MembersTab({lang,t,employees,addEmployee,updateEmployee,deleteEmployee,
 }
 
 // ══════════════════════════════════════════════════════════════════
-// 관리자 직접 휴가 관리 모달
+// 관리자 직접 휴가 등록/삭제 모달
 // ══════════════════════════════════════════════════════════════════
 function AdminSchedModal({t,lang,emp,requests,onAdd,onDelete,onEdit,onClose}){
   const [type,setType]=useState("選択休暇");
@@ -1385,11 +1427,12 @@ function AdminSchedModal({t,lang,emp,requests,onAdd,onDelete,onEdit,onClose}){
   return (
     <div style={S.overlay} onClick={onClose}>
       <div style={{...S.modalBox,maxWidth:500}} onClick={e=>e.stopPropagation()}>
-        <h3 style={S.modalTitle}>📅 {lang==="ja"?emp.name:emp.name_ko} {t("の休暇管理","의 휴가관리")}</h3>
+        <h3 style={S.modalTitle}>📅 {lang==="ja"?emp.name:emp.name_ko} {t("の休暇管理","의 휴가 관리")}</h3>
 
+        {/* 직접 등록 폼 */}
         <div style={{background:"#f0fdf4",borderRadius:12,padding:"14px 16px",marginBottom:16}}>
           <div style={{fontSize:13,fontWeight:700,color:"#166534",marginBottom:10}}>
-            + {t("新規登録（即時承認）","신규 등록(즉시 승인)")}
+            + {t("新規登録（即時承認）","신규 등록（즉시 승인）")}
           </div>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
             <div>
@@ -1414,10 +1457,10 @@ function AdminSchedModal({t,lang,emp,requests,onAdd,onDelete,onEdit,onClose}){
             </div>
           )}
           <input style={{...S.input,marginBottom:8}} value={note}
-            onChange={e=>setNote(e.target.value)} placeholder={t("備考（任意）","비고(선택)")}/>
+            onChange={e=>setNote(e.target.value)} placeholder={t("備考（任意）","비고（선택）")}/>
           <button style={{...S.primaryBtn,width:"100%",padding:"8px"}}
             onClick={async()=>{
-              if(!date){alert(t("日付を選択してください","날짜를 선택해주세요"));return;}
+              if(!date){alert(t("日付を選択してください","날짜를 선택하세요"));return;}
               const btn=document.activeElement;
               if(btn) btn.disabled=true;
               await onAdd({emp_id:emp.id,type,date,note,half});
@@ -1427,6 +1470,7 @@ function AdminSchedModal({t,lang,emp,requests,onAdd,onDelete,onEdit,onClose}){
           </button>
         </div>
 
+        {/* 기존 신청 목록 */}
         <div style={{fontSize:13,fontWeight:700,color:"#374151",marginBottom:8}}>
           {t("申請履歴","신청 이력")} ({empReqs.length}{t("件","건")})
         </div>
@@ -1449,7 +1493,7 @@ function AdminSchedModal({t,lang,emp,requests,onAdd,onDelete,onEdit,onClose}){
                     const newDate=prompt(t("新しい日付を入力 (例: 2026-07-01)","새 날짜 입력 (예: 2026-07-01)"),r.date);
                     if(newDate&&newDate!==r.date) onEdit(r.id,{date:newDate});
                   }}>
-                  ✏️ {t("変更","변경")}
+                  ✏ {t("変更","변경")}
                 </button>
                 <button style={{...S.rejectBtn,padding:"4px 8px",fontSize:11}}
                   onClick={()=>onDelete(r.id,r)}>
@@ -1476,6 +1520,7 @@ function ReqModal({t,initDate,empId,selectedDayOff,onSubmit,onClose}){
   const [note,setNote]=useState("");
   const [half,setHalf]=useState(false);
 
+  // 선택휴무: 직원은 월/수/토 중 선택
   const dayOffLabel="月・水・土";
 
   return (
@@ -1483,15 +1528,18 @@ function ReqModal({t,initDate,empId,selectedDayOff,onSubmit,onClose}){
       <div style={S.modalBox} onClick={e=>e.stopPropagation()}>
         <h3 style={S.modalTitle}>📋 {t("休暇申請","휴가 신청")}</h3>
 
+        {/* 종류 선택 */}
         <div style={S.fg}>
           <label style={S.fl}>{t("休暇の種類","휴가 종류")}</label>
           <div style={{display:"flex",gap:8}}>
             {[
               {val:"選択休暇",bg:COLOR.sentaku.bg,tc:COLOR.sentaku.text,
-               label:t(`選択休暇（${dayOffLabel}）`,`선택휴무(${dayOffLabel})`)},
+               label:t(`選択休暇（${dayOffLabel}）`,`선택휴무（${dayOffLabel}）`)},
               {val:"有給休暇",bg:COLOR.yukyu.bg,tc:COLOR.yukyu.text,
                label:t("有給休暇","유급휴가")},
               {val:"代替休暇",bg:COLOR.daitai.bg,tc:COLOR.daitai.text,
+               label:t("代替休暇","대체휴가")},
+            {val:"代替休暇",bg:COLOR.daitai.bg,tc:COLOR.daitai.text,
                label:t("代替休暇","대체휴가")},
             ].map(o=>(
               <button key={o.val} onClick={()=>setType(o.val)}
@@ -1514,7 +1562,7 @@ function ReqModal({t,initDate,empId,selectedDayOff,onSubmit,onClose}){
 
         {type==="有給休暇"&&(
           <div style={S.fg}>
-            <label style={S.fl}>{t("取得区分","사용 구분")}</label>
+            <label style={S.fl}>{t("取得区分","취득 구분")}</label>
             <div style={{display:"flex",gap:8}}>
               {[
                 {val:false,label:t("全日","전일"),bg:COLOR.yukyu.bg,tc:COLOR.yukyu.text},
@@ -1532,7 +1580,7 @@ function ReqModal({t,initDate,empId,selectedDayOff,onSubmit,onClose}){
         )}
 
         <div style={S.fg}>
-          <label style={S.fl}>{t("備考・理由","비고·이유")}</label>
+          <label style={S.fl}>{t("備考・理由","비고·사유")}</label>
           <textarea style={{...S.input,height:60,resize:"vertical"}} value={note}
             onChange={e=>setNote(e.target.value)} placeholder={t("任意で入力","선택 입력")}/>
         </div>
@@ -1551,11 +1599,175 @@ function ReqModal({t,initDate,empId,selectedDayOff,onSubmit,onClose}){
 // ══════════════════════════════════════════════════════════════════
 // 비밀번호 변경 모달
 // ══════════════════════════════════════════════════════════════════
-function ChangePwModal({t,user,onSave,onClose}){
+function AttendanceCheckModal({ t, currentUser, workplaces, todayRow, outsideStartedAt, onSuccess, onClose }) {
+  const [step, setStep] = useState("choose");
+  const [actionType, setActionType] = useState(null);
+  const [error, setError] = useState("");
+  const html5QrRef = useRef(null);
+
+  const hasClockIn = !!todayRow?.clock_in;
+  const hasClockOut = !!todayRow?.clock_out;
+  const isOutside = !!outsideStartedAt;
+
+  const ACTIONS = [
+    { key: "出勤", label: t("出勤", "출근"), color: "#10b981", disabled: hasClockIn },
+    { key: "外出", label: t("外出", "외출"), color: "#f59e0b", disabled: !hasClockIn || hasClockOut || isOutside },
+    { key: "外出戻り", label: t("外出戻り", "외출복귀"), color: "#6366f1", disabled: !isOutside },
+    { key: "退勤", label: t("退勤", "퇴근"), color: "#ef4444", disabled: !hasClockIn || hasClockOut || isOutside },
+  ];
+
+  function startScan(action) {
+    setActionType(action);
+    setError("");
+    setStep("scanning");
+  }
+
+  useEffect(() => {
+    if (step !== "scanning") return;
+    const qr = new Html5Qrcode("qr-reader-box");
+    html5QrRef.current = qr;
+    qr.start(
+      { facingMode: "environment" },
+      { fps: 10, qrbox: 220 },
+      (decodedText) => {
+        qr.stop().catch(() => {});
+        const wp = workplaces.find((w) => w.qr_code === decodedText.trim());
+        if (!wp) {
+          setError(t("登録されていないQRコードです", "등록되지 않은 QR코드입니다"));
+          setStep("choose");
+          return;
+        }
+        checkLocationAndSubmit(wp);
+      },
+      () => {}
+    ).catch(() => {
+      setError(t("カメラを起動できません。権限を確認してください。", "카메라를 시작할 수 없습니다. 권한을 확인해주세요."));
+      setStep("choose");
+    });
+    return () => {
+      if (html5QrRef.current) html5QrRef.current.isScanning && html5QrRef.current.isScanning && html5QrRef.current.stop().catch(() => {});
+    };
+  }, [step]);
+
+  function checkLocationAndSubmit(wp) {
+    setStep("location");
+    if (!navigator.geolocation) {
+      setError(t("この端末は位置情報に対応していません", "이 기기는 위치 정보를 지원하지 않습니다"));
+      setStep("choose");
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const dist = distanceMeters(
+          pos.coords.latitude, pos.coords.longitude,
+          Number(wp.lat), Number(wp.lng)
+        );
+        if (dist > MAX_DISTANCE_METERS) {
+          setError(
+            t(
+              `倉庫から${Math.round(dist)}m離れています。${MAX_DISTANCE_METERS}m以内で再試行してください。`,
+              `창고에서 ${Math.round(dist)}m 떨어져 있습니다. ${MAX_DISTANCE_METERS}m 이내에서 다시 시도해주세요.`
+            )
+          );
+          setStep("choose");
+          return;
+        }
+        onSuccess(actionType, wp.id);
+        setStep("done");
+      },
+      () => {
+        setError(t("位置情報を取得できませんでした。権限を確認してください。", "위치 정보를 가져올 수 없습니다. 권한을 확인해주세요."));
+        setStep("choose");
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
+  }
+
+  return (
+    <div style={S.overlay} onClick={step === "choose" ? onClose : undefined}>
+      <div style={S.modalBox} onClick={(e) => e.stopPropagation()}>
+        <h3 style={S.modalTitle}>📷 {t("出退勤チェック", "출퇴근 체크")}</h3>
+
+        {error && (
+          <div style={{ background: "#fee2e2", color: "#991b1b", borderRadius: 10, padding: "10px 14px", marginBottom: 16, fontSize: 13 }}>
+            ⚠ {error}
+          </div>
+        )}
+
+        {step === "choose" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {ACTIONS.map((a) => (
+              <button
+                key={a.key}
+                disabled={a.disabled}
+                onClick={() => startScan(a.key)}
+                style={{
+                  padding: "14px",
+                  borderRadius: 12,
+                  border: "none",
+                  background: a.disabled ? "#d1d5db" : a.color,
+                  color: "#fff",
+                  fontWeight: 800,
+                  fontSize: 15,
+                  cursor: a.disabled ? "not-allowed" : "pointer",
+                  opacity: a.disabled ? 0.6 : 1,
+                }}
+              >
+                {a.label}
+              </button>
+            ))}
+            <button style={{ ...S.closeBtn, marginTop: 8, textAlign: "center" }} onClick={onClose}>
+              {t("閉じる", "닫기")}
+            </button>
+          </div>
+        )}
+
+        {step === "scanning" && (
+          <div>
+            <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 10, textAlign: "center" }}>
+              {t("倉庫のQRコードを読み取ってください", "창고의 QR코드를 스캔해주세요")}
+            </div>
+            <div id="qr-reader-box" style={{ width: "100%", borderRadius: 12, overflow: "hidden" }} />
+            <button
+              style={{ ...S.closeBtn, marginTop: 12, width: "100%", textAlign: "center" }}
+              onClick={() => {
+                if (html5QrRef.current) html5QrRef.current.isScanning && html5QrRef.current.isScanning && html5QrRef.current.stop().catch(() => {});
+                setStep("choose");
+              }}
+            >
+              {t("キャンセル", "취소")}
+            </button>
+          </div>
+        )}
+
+        {step === "location" && (
+          <div style={{ textAlign: "center", padding: "30px 0" }}>
+            <div style={{ fontSize: 40, marginBottom: 12 }}>📍</div>
+            <div style={{ fontSize: 14, color: "#374151" }}>
+              {t("位置情報を確認しています…", "위치 정보를 확인하는 중…")}
+            </div>
+          </div>
+        )}
+
+        {step === "done" && (
+          <div style={{ textAlign: "center", padding: "30px 0" }}>
+            <div style={{ fontSize: 40, marginBottom: 12 }}>✅</div>
+            <div style={{ fontSize: 15, fontWeight: 700, color: "#10b981" }}>
+              {t("記録しました！", "기록되었습니다!")}
+            </div>
+            <button style={{ ...S.primaryBtn, marginTop: 16, width: "100%" }} onClick={onClose}>
+              {t("閉じる", "닫기")}
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}function ChangePwModal({t,user,onSave,onClose}){
   const [cur,setCur]=useState("");const [nw,setNw]=useState("");const [nw2,setNw2]=useState("");
   const [show,setShow]=useState(false);const [err,setErr]=useState("");
   function handleSave(){
-    if(cur!==user.password){setErr(t("現在のパスワードが違います","현재 비밀번호가 틀립니다"));return;}
+    if(cur!==user.password){setErr(t("現在のパスワードが違います","현재 비밀번호 틀림"));return;}
     if(nw.length<6){setErr(t("6文字以上","6자 이상"));return;}
     if(nw!==nw2){setErr(t("パスワードが一致しません","비밀번호 불일치"));return;}
     setErr("");onSave(nw);onClose();
@@ -1590,7 +1802,7 @@ function ChangePwModal({t,user,onSave,onClose}){
 }
 
 // ══════════════════════════════════════════════════════════════════
-// 공통 컴포넌트들
+// 공통 컴포넌트
 // ══════════════════════════════════════════════════════════════════
 function CalHeader({year,month,prev,next}){
   return (<div style={{display:"flex",alignItems:"center",gap:16}}>
@@ -1623,210 +1835,6 @@ function Field({label,req,children}){
   return (<div><label style={{display:"block",fontSize:12,fontWeight:700,color:"#374151",marginBottom:5}}>
     {label}{req&&<span style={{color:"#ef4444",marginLeft:3}}>*</span>}
   </label>{children}</div>);
-}
-
-
-// ══════════════════════════════════════════════════════════════════
-// 출퇴근 관리 탭
-// ══════════════════════════════════════════════════════════════════
-function AttendanceTab({ lang, t, employees }) {
-  const [workplaces, setWorkplaces] = useState([]);
-
-  useEffect(() => {
-    sbFetch("workplaces?is_active=eq.true&select=*").then(data => {
-      if (Array.isArray(data)) setWorkplaces(data);
-    });
-  }, []);
-
-  function getWPName(wpId) {
-    const wp = workplaces.find(w => w.id === wpId);
-    return wp ? wp.name : "-";
-  }
-  const [viewMode, setViewMode] = useState("date");
-  const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().slice(0, 10));
-  const [selectedEmpId, setSelectedEmpId] = useState("");
-  const [selectedMonth, setSelectedMonth] = useState(() => {
-    const now = new Date();
-    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
-  });
-  const [records, setRecords] = useState([]);
-  const [loading, setLoading] = useState(false);
-
-  const empOnly = employees.filter(e => e.role === "employee");
-
-  useEffect(() => {
-    if (empOnly.length > 0 && !selectedEmpId) setSelectedEmpId(empOnly[0].id);
-  }, [employees]);
-
-  useEffect(() => {
-    if (viewMode === "date" && selectedDate) fetchRecords();
-  }, [viewMode, selectedDate]);
-
-  useEffect(() => {
-    if (viewMode === "employee" && selectedEmpId) fetchRecords();
-  }, [viewMode, selectedEmpId, selectedMonth]);
-
-  async function fetchRecords() {
-    setLoading(true);
-    try {
-      let path = "";
-      if (viewMode === "date") {
-        path = `/attendance_records?work_date=eq.${selectedDate}&select=*&order=clock_in.asc`;
-      } else {
-        const [year, month] = selectedMonth.split("-");
-        const startDate = `${year}-${month}-01`;
-        const endDate = new Date(year, month, 0).toISOString().slice(0, 10);
-        path = `/attendance_records?employee_id=eq.${selectedEmpId}&work_date=gte.${startDate}&work_date=lte.${endDate}&select=*&order=work_date.asc`;
-      }
-      const data = await sbFetch(path);
-      setRecords(Array.isArray(data) ? data : []);
-    } catch { setRecords([]); }
-    setLoading(false);
-  }
-
-  function fmtTime(iso) {
-    if (!iso) return "-";
-    return new Date(iso).toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit", hour12: false });
-  }
-
-  function calcWork(ci, co) {
-    if (!ci || !co) return "-";
-    const diff = new Date(co) - new Date(ci);
-    const h = Math.floor(diff / 3600000);
-    const m = Math.floor((diff % 3600000) / 60000);
-    return `${h}時間${m}分`;
-  }
-
-  function getEmpName(empId) {
-    const emp = employees.find(e => e.id === empId);
-    if (!emp) return "-";
-    return lang === "ja" ? emp.name : emp.name_ko;
-  }
-
-  function downloadExcel() {
-    let rows = [];
-    if (viewMode === "date") {
-      rows = [
-        ["日付", "社員名", "勤務地", "出勤時間", "退勤時間", "勤務時間", "状態"],
-        ...records.map(r => [r.work_date, getEmpName(r.employee_id), getWPName(r.workplace_id), fmtTime(r.clock_in), fmtTime(r.clock_out), calcWork(r.clock_in, r.clock_out), r.status === "working" ? "出勤中" : "退勤済"])
-      ];
-    } else {
-      const emp = employees.find(e => e.id === selectedEmpId);
-      const empName = lang === "ja" ? emp?.name : emp?.name_ko;
-      rows = [
-        ["社員名", "日付", "勤務地", "出勤時間", "退勤時間", "勤務時間", "状態"],
-        ...records.map(r => [empName, r.work_date, getWPName(r.workplace_id), fmtTime(r.clock_in), fmtTime(r.clock_out), calcWork(r.clock_in, r.clock_out), r.status === "working" ? "出勤中" : "退勤済"])
-      ];
-    }
-    const csv = rows.map(r => r.join(",")).join("\n");
-    const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = viewMode === "date" ? `出退勤_${selectedDate}.csv` : `出退勤_${getEmpName(selectedEmpId)}_${selectedMonth}.csv`;
-    a.click();
-  }
-
-  const thS = { padding: "10px 12px", textAlign: "left", fontWeight: 700, color: "#374151", borderBottom: "2px solid #e2e8f0", whiteSpace: "nowrap", fontSize: 13 };
-  const tdS = { padding: "10px 12px", borderBottom: "1px solid #f1f5f9", color: "#374151", fontSize: 13 };
-
-  return (
-    <div>
-      <h3 style={S.secTitle}>{t("出退勤管理","출퇴근 관리")}</h3>
-
-      {/* 보기 모드 전환 */}
-      <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
-        {[["date", t("📅 日付別","📅 날짜별")], ["employee", t("👤 社員別","👤 직원별")]].map(([mode, label]) => (
-          <button key={mode} onClick={() => setViewMode(mode)}
-            style={{ flex: 1, padding: "10px", border: "none", borderRadius: 10, cursor: "pointer", fontWeight: 700, fontSize: 14,
-              background: viewMode === mode ? "#0F6E56" : "#f1f5f9",
-              color: viewMode === mode ? "#fff" : "#374151" }}>
-            {label}
-          </button>
-        ))}
-      </div>
-
-      {/* 날짜별 필터 */}
-      {viewMode === "date" && (
-        <div style={{ marginBottom: 16 }}>
-          <label style={{ fontSize: 12, fontWeight: 700, color: "#374151", display: "block", marginBottom: 6 }}>{t("日付を選択","날짜 선택")}</label>
-          <input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)}
-            style={{ padding: "10px 14px", border: "1.5px solid #e2e8f0", borderRadius: 10, fontSize: 14, width: "100%", boxSizing: "border-box" }}/>
-        </div>
-      )}
-
-      {/* 직원별 필터 */}
-      {viewMode === "employee" && (
-        <div style={{ display: "flex", gap: 10, marginBottom: 16 }}>
-          <div style={{ flex: 1 }}>
-            <label style={{ fontSize: 12, fontWeight: 700, color: "#374151", display: "block", marginBottom: 6 }}>{t("社員を選択","직원 선택")}</label>
-            <select value={selectedEmpId} onChange={e => setSelectedEmpId(e.target.value)}
-              style={{ padding: "10px 14px", border: "1.5px solid #e2e8f0", borderRadius: 10, fontSize: 14, width: "100%" }}>
-              {empOnly.map(e => <option key={e.id} value={e.id}>{lang === "ja" ? e.name : e.name_ko}</option>)}
-            </select>
-          </div>
-          <div style={{ flex: 1 }}>
-            <label style={{ fontSize: 12, fontWeight: 700, color: "#374151", display: "block", marginBottom: 6 }}>{t("月を選択","월 선택")}</label>
-            <input type="month" value={selectedMonth} onChange={e => setSelectedMonth(e.target.value)}
-              style={{ padding: "10px 14px", border: "1.5px solid #e2e8f0", borderRadius: 10, fontSize: 14, width: "100%", boxSizing: "border-box" }}/>
-          </div>
-        </div>
-      )}
-
-      {/* 엑셀 다운로드 */}
-      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 14 }}>
-        <button onClick={downloadExcel}
-          style={{ background: "#217346", color: "#fff", border: "none", borderRadius: 8, padding: "8px 18px", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
-          ⬇ Excel {t("ダウンロード","다운로드")}
-        </button>
-      </div>
-
-      {/* 결과 */}
-      {loading ? (
-        <div style={{ textAlign: "center", padding: 30, color: "#9ca3af" }}>{t("読み込み中...","로딩 중...")}</div>
-      ) : records.length === 0 ? (
-        <div style={S.empty}>{t("記録がありません","기록이 없습니다")}</div>
-      ) : (
-        <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
-            <thead>
-              <tr style={{ background: "#f8fafc" }}>
-                {viewMode === "date" ? <th style={thS}>{t("社員名","직원명")}</th> : <th style={thS}>{t("日付","날짜")}</th>}
-                <th style={thS}>{t("出勤","출근")}</th>
-                <th style={thS}>{t("退勤","퇴근")}</th>
-                <th style={thS}>{t("勤務時間","근무시간")}</th>
-                <th style={thS}>{t("勤務地","근무지")}</th>
-                <th style={thS}>{t("状態","상태")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {records.map((r, i) => (
-                <tr key={r.id} style={{ background: i % 2 === 0 ? "#fff" : "#f8fafc" }}>
-                  {viewMode === "date" ? <td style={tdS}>{getEmpName(r.employee_id)}</td> : <td style={tdS}>{r.work_date}</td>}
-                  <td style={tdS}>{fmtTime(r.clock_in)}</td>
-                  <td style={tdS}>{fmtTime(r.clock_out)}</td>
-                  <td style={tdS}>{calcWork(r.clock_in, r.clock_out)}</td>
-                  <td style={tdS}>{getWPName(r.workplace_id)}</td>
-                  <td style={tdS}>
-                    <span style={{ background: r.status === "working" ? "#d1fae5" : "#dbeafe", color: r.status === "working" ? "#065f46" : "#1e40af", padding: "2px 8px", borderRadius: 6, fontSize: 11, fontWeight: 700 }}>
-                      {r.status === "working" ? t("出勤中","출근중") : t("退勤済","퇴근완료")}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {viewMode === "employee" && (
-            <div style={{ marginTop: 12, padding: "10px 14px", background: "#f0fdf4", borderRadius: 10, fontSize: 13 }}>
-              <span style={{ fontWeight: 700, color: "#065f46" }}>
-                {t("出勤日数","출근일수")}: {records.filter(r => r.clock_in).length}{t("日","일")}
-              </span>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
 }
 
 const S={
