@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect } from "react";
 import QRScan from "./QRScan";
 import MainMenu from "./MainMenu";
+import AdminAttendanceView from "./AdminAttendanceView";
 
 const SUPA_URL = import.meta.env.VITE_SUPABASE_URL;
 const SUPA_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -338,7 +339,11 @@ export default function App(){
                 >
                   ← {t("メニューに戻る","메뉴로 돌아가기")}
                 </button>
-                <QRScan employee={currentEmp}/>
+                {loggedIn.role==="admin" ? (
+  <AttendanceAdminTabs lang={lang} t={t} employees={employees} currentEmp={currentEmp}/>
+) : (
+  <QRScan employee={currentEmp}/>
+)}
               </div>
             )}
 
@@ -367,6 +372,30 @@ export default function App(){
 }
 
 // ── 공통 로고 ─────────────────────────────────────────────────────
+function AttendanceAdminTabs({lang,t,employees,currentEmp}){
+  const [sub,setSub]=useState("check");
+  return (
+    <div>
+      <div style={{display:"flex",gap:8,marginBottom:16}}>
+        <button onClick={()=>setSub("check")}
+          style={{padding:"8px 16px",border:"1px solid #D3D1C7",borderRadius:10,
+            background:sub==="check"?"#6366f1":"#fff",color:sub==="check"?"#fff":"#374151",
+            fontWeight:700,cursor:"pointer"}}>
+          📱 {t("QRチェックイン","QR체크인")}
+        </button>
+        <button onClick={()=>setSub("manage")}
+          style={{padding:"8px 16px",border:"1px solid #D3D1C7",borderRadius:10,
+            background:sub==="manage"?"#6366f1":"#fff",color:sub==="manage"?"#fff":"#374151",
+            fontWeight:700,cursor:"pointer"}}>
+          📋 {t("出退勤管理","출퇴근관리")}
+        </button>
+      </div>
+      {sub==="check"
+        ? <QRScan employee={currentEmp}/>
+        : <AdminAttendanceView lang={lang} t={t} employees={employees.filter(e=>e.role==="employee")}/>}
+    </div>
+  );
+}
 function SmileLogo({size=52}){
   return (
     <svg width={size} height={size} viewBox="0 0 64 64" fill="none">

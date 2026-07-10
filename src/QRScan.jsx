@@ -14,7 +14,9 @@ async function sbFetch(path, options = {}) {
     },
     ...options,
   });
-  return res.json();
+  if (!res.ok) { const err = await res.text(); throw new Error(err); }
+  const text = await res.text();
+  return text ? JSON.parse(text) : [];
 }
 
 function getJST() {
@@ -160,6 +162,22 @@ export default function QRScan({ employee }) {
     });
   }, []);
 
+  // 오늘 이 직원의 현재 상태를 서버에서 확인 (새로고침해도 유지되게)
+  useEffect(() => {
+    if (!employee?.id) return;
+    const workDate = getJST().toISOString().slice(0, 10);
+    sbFetch(`attendance_records?employee_id=eq.${employee.id}&work_date=eq.${workDate}&order=clock_in.desc&limit=1`)
+      .then(rows => {
+        if (Array.isArray(rows) && rows.length > 0) {
+          const rec = rows[0];
+          if (rec.clock_out) setEmpStatus("off");
+          else if (rec.status === "outside") setEmpStatus("outside");
+          else setEmpStatus("working");
+        }
+      })
+      .catch(() => {});
+  }, [employee?.id]);
+
   function handleAction(actionKey) {
     if (!selectedWP) return;
     setSelectedAction(actionKey);
@@ -201,9 +219,9 @@ export default function QRScan({ employee }) {
         }
       }
 
-      // 4단계: 출퇴근 처리
+      // 4단계: 출퇴근 처리 (GPS 좌표 같이 전달)
       setPhase("processing");
-      await processAttendance(selectedAction);
+      await processAttendance(selectedAction, latitude, longitude);
 
     } catch (err) {
       if (err?.code === 1) {
@@ -219,27 +237,86 @@ export default function QRScan({ employee }) {
     }
   }
 
-  async function processAttendance(actionKey) {
+  // 오늘 날짜 기준, 아직 퇴근 안 한(clock_out이 비어있는) 출근 기록 찾기
+  async function getOpenAttendance(employeeId, workDate) {
+    const rows = await sbFetch(
+      `attendance_records?employee_id=eq.${employeeId}&work_date=eq.${workDate}&clock_out=is.null&order=clock_in.desc&limit=1`
+    );
+    return Array.isArray(rows) && rows.length > 0 ? rows[0] : null;
+  }
+
+  async function processAttendance(actionKey, lat, lng) {
     const now = getJST();
     const workDate = now.toISOString().slice(0, 10);
+    const empId = employee?.id || 1;
 
     try {
       if (actionKey === "clock_in") {
         await sbFetch("attendance_records", {
           method: "POST",
           body: JSON.stringify({
-            employee_id: employee?.id || 1,
+            employee_id: empId,
             workplace_id: selectedWP.id,
             work_date: workDate,
             clock_in: now.toISOString(),
+            clock_in_lat: lat,
+            clock_in_lng: lng,
             status: "working",
           }),
         });
+
       } else if (actionKey === "clock_out") {
-        await sbFetch(
-          `attendance_records?employee_id=eq.${employee?.id || 1}&work_date=eq.${workDate}&status=eq.working`,
-          { method: "PATCH", body: JSON.stringify({ clock_out: now.toISOString(), status: "done" }) }
+        const open = await getOpenAttendance(empId, workDate);
+        if (!open) throw new Error("出勤記録が見つかりません。先に出勤を押してください。");
+        await sbFetch(`attendance_records?id=eq.${open.id}`, {
+          method: "PATCH",
+          body: JSON.stringify({
+            clock_out: now.toISOString(),
+            clock_out_lat: lat,
+            clock_out_lng: lng,
+            status: "done",
+          }),
+        });
+
+      } else if (actionKey === "outside_start") {
+        const open = await getOpenAttendance(empId, workDate);
+        if (!open) throw new Error("出勤記録が見つかりません。先に出勤を押してください。");
+        await sbFetch("outside_logs", {
+          method: "POST",
+          body: JSON.stringify({
+            attendance_id: open.id,
+            out_at: now.toISOString(),
+            out_lat: lat,
+            out_lng: lng,
+          }),
+        });
+        await sbFetch(`attendance_records?id=eq.${open.id}`, {
+          method: "PATCH",
+          body: JSON.stringify({ status: "outside" }),
+        });
+
+      } else if (actionKey === "outside_end") {
+        const open = await getOpenAttendance(empId, workDate);
+        if (!open) throw new Error("出勤記録が見つかりません。");
+        const openLogs = await sbFetch(
+          `outside_logs?attendance_id=eq.${open.id}&in_at=is.null&order=out_at.desc&limit=1`
         );
+        if (!openLogs || openLogs.length === 0) throw new Error("外出記録が見つかりません。先に外出を押してください。");
+        const log = openLogs[0];
+        await sbFetch(`outside_logs?id=eq.${log.id}`, {
+          method: "PATCH",
+          body: JSON.stringify({ in_at: now.toISOString(), in_lat: lat, in_lng: lng }),
+        });
+        // 외출 시간(분) 누적 계산
+        const outMs = now.getTime() - new Date(log.out_at).getTime();
+        const addMinutes = Math.max(0, Math.round(outMs / 60000));
+        await sbFetch(`attendance_records?id=eq.${open.id}`, {
+          method: "PATCH",
+          body: JSON.stringify({
+            status: "working",
+            outside_minutes: (open.outside_minutes || 0) + addMinutes,
+          }),
+        });
       }
 
       setEmpStatus({ clock_in: "working", outside_start: "outside", outside_end: "working", clock_out: "off" }[actionKey]);
