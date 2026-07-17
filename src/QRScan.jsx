@@ -252,6 +252,11 @@ export default function QRScan({ employee }) {
 
     try {
       if (actionKey === "clock_in") {
+        // 이미 오늘 출근(미퇴근) 기록이 있으면 중복 생성 방지
+        const already = await getOpenAttendance(empId, workDate);
+        if (already) {
+          throw new Error(`本日すでに出勤打刻済みです（${fmtTime(new Date(already.clock_in))}）。重複して出勤を押さないでください。`);
+        }
         await sbFetch("attendance_records", {
           method: "POST",
           body: JSON.stringify({
@@ -358,14 +363,30 @@ export default function QRScan({ employee }) {
 
         {phase === "idle" && (
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 14 }}>
-            {ACTIONS.map(a => (
-              <button key={a.key} onClick={() => handleAction(a.key)}
-                style={{ background: a.bg, border: "none", borderRadius: 16, padding: "24px 12px", cursor: "pointer", textAlign: "center" }}>
-                <div style={{ fontSize: 32, marginBottom: 8 }}>{a.icon}</div>
-                <div style={{ fontSize: 17, fontWeight: 700, color: a.color }}>{a.label}</div>
-                <div style={{ fontSize: 11, color: "#888", marginTop: 4 }}>QRスキャン</div>
-              </button>
-            ))}
+            {ACTIONS.map(a => {
+              // 현재 상태(empStatus)에 맞는 버튼만 누를 수 있게 제한 (중복 클릭 방지)
+              const allowedByStatus = {
+                none:    ["clock_in"],
+                working: ["outside_start", "clock_out"],
+                outside: ["outside_end"],
+                off:     [],
+              };
+              const isEnabled = (allowedByStatus[empStatus] || []).includes(a.key);
+              return (
+                <button key={a.key} onClick={() => isEnabled && handleAction(a.key)}
+                  disabled={!isEnabled}
+                  style={{
+                    background: isEnabled ? a.bg : "#f1f1f1",
+                    border: "none", borderRadius: 16, padding: "24px 12px",
+                    cursor: isEnabled ? "pointer" : "not-allowed",
+                    textAlign: "center", opacity: isEnabled ? 1 : 0.45,
+                  }}>
+                  <div style={{ fontSize: 32, marginBottom: 8 }}>{a.icon}</div>
+                  <div style={{ fontSize: 17, fontWeight: 700, color: isEnabled ? a.color : "#999" }}>{a.label}</div>
+                  <div style={{ fontSize: 11, color: "#888", marginTop: 4 }}>{isEnabled ? "QRスキャン" : "-"}</div>
+                </button>
+              );
+            })}
           </div>
         )}
 
@@ -427,4 +448,3 @@ export default function QRScan({ employee }) {
     </div>
   );
 }
-
