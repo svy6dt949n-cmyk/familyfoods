@@ -19,14 +19,28 @@ async function sbFetch(path, options = {}) {
   return text ? JSON.parse(text) : [];
 }
 
-function getJST() {
-  return new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Tokyo" }));
-}
 
+// ⚠️ 기기 자체의 시간대 설정에 의존하지 않고, 항상 정확한 절대시각(now)을 그대로 사용.
+// 화면 표시(시:분:초, 날짜)만 "Asia/Tokyo" 기준으로 변환해서 보여준다.
 function fmtTime(date) {
   return date.toLocaleTimeString("ja-JP", {
-    hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false
+    hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
+    timeZone: "Asia/Tokyo",
   });
+}
+
+function fmtDate(date) {
+  return date.toLocaleDateString("ja-JP", {
+    year: "numeric", month: "2-digit", day: "2-digit", weekday: "short",
+    timeZone: "Asia/Tokyo",
+  });
+}
+
+// 기기의 시간대/날짜 설정이 잘못되어 있어도, 실제 절대시각(now)만 정확하면
+// 항상 정확한 일본시간(JST) 기준 날짜(YYYY-MM-DD)를 계산
+function getJSTDateStr(baseDate = new Date()) {
+  const jstMs = baseDate.getTime() + 9 * 60 * 60 * 1000;
+  return new Date(jstMs).toISOString().slice(0, 10);
 }
 
 function calcDistance(lat1, lng1, lat2, lng2) {
@@ -143,13 +157,14 @@ export default function QRScan({ employee }) {
   const [selectedAction, setSelectedAction] = useState(null);
   const [empStatus, setEmpStatus] = useState("none");
   const [history, setHistory] = useState([]);
-  const [clock, setClock] = useState(fmtTime(getJST()));
+  const [clock, setClock] = useState(fmtTime(new Date()));
+  const [dateStr, setDateStr] = useState(fmtDate(new Date()));
   const [workplaces, setWorkplaces] = useState([]);
   const [selectedWP, setSelectedWP] = useState(null);
   const [errorMsg, setErrorMsg] = useState("");
 
   useEffect(() => {
-    const id = setInterval(() => setClock(fmtTime(getJST())), 1000);
+    const id = setInterval(() => { setClock(fmtTime(new Date())); setDateStr(fmtDate(new Date())); }, 1000);
     return () => clearInterval(id);
   }, []);
 
@@ -165,7 +180,7 @@ export default function QRScan({ employee }) {
   // 오늘 이 직원의 현재 상태를 서버에서 확인 (새로고침해도 유지되게)
   useEffect(() => {
     if (!employee?.id) return;
-    const workDate = getJST().toISOString().slice(0, 10);
+    const workDate = getJSTDateStr();
     sbFetch(`attendance_records?employee_id=eq.${employee.id}&work_date=eq.${workDate}&order=clock_in.desc&limit=1`)
       .then(rows => {
         if (Array.isArray(rows) && rows.length > 0) {
@@ -246,8 +261,8 @@ export default function QRScan({ employee }) {
   }
 
   async function processAttendance(actionKey, lat, lng) {
-    const now = getJST();
-    const workDate = now.toISOString().slice(0, 10);
+    const now = new Date();
+    const workDate = getJSTDateStr(now);
     const empId = employee?.id || 1;
 
     try {
@@ -345,7 +360,8 @@ export default function QRScan({ employee }) {
       <div style={{ background: "#0F6E56", padding: "20px 22px 18px", borderRadius: "0 0 22px 22px" }}>
         <div style={{ fontSize: 11, color: "#9FE1CB", letterSpacing: 1, fontWeight: 600 }}>FAMILY FOODS</div>
         <div style={{ fontSize: 26, fontWeight: 700, color: "#fff", marginTop: 4 }}>出退勤</div>
-        <div style={{ fontSize: 42, fontWeight: 300, color: "#fff", marginTop: 12, letterSpacing: 3 }}>{clock}</div>
+        <div style={{ fontSize: 14, fontWeight: 600, color: "#fff", marginTop: 10 }}>{dateStr}</div>
+        <div style={{ fontSize: 42, fontWeight: 300, color: "#fff", marginTop: 4, letterSpacing: 3 }}>{clock}</div>
         <div style={{ fontSize: 11, color: "#9FE1CB" }}>JST (Asia/Tokyo)</div>
         <div style={{ marginTop: 12, display: "inline-block", background: "rgba(255,255,255,0.15)", borderRadius: 20, padding: "6px 16px", fontSize: 13, color: "#fff", fontWeight: 600 }}>
           {statusLabel[empStatus]}
@@ -411,7 +427,8 @@ export default function QRScan({ employee }) {
             <div style={{ fontSize: 22, fontWeight: 700, color: actionMeta(selectedAction)?.color, marginTop: 8 }}>
               {actionMeta(selectedAction)?.label} 完了
             </div>
-            <div style={{ fontSize: 28, marginTop: 8 }}>{clock}</div>
+            <div style={{ fontSize: 13, color: "#666", marginTop: 8 }}>{dateStr}</div>
+            <div style={{ fontSize: 28, marginTop: 2 }}>{clock}</div>
             <div style={{ fontSize: 13, color: "#666", marginTop: 8 }}>{selectedWP?.name}</div>
           </div>
         )}
@@ -448,3 +465,4 @@ export default function QRScan({ employee }) {
     </div>
   );
 }
+
