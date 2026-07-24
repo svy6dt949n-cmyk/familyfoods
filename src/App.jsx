@@ -90,8 +90,14 @@ export default function App(){
   const [loading,setLoading]=useState(true);
   const [toast,setToast]=useState(null);
   const [submitting,setSubmitting]=useState(false);
-  const [year,setYear]=useState(2026);
-  const [month,setMonth]=useState(5);
+  const [year,setYear]=useState(()=>{
+  const jst=new Date(Date.now()+9*60*60*1000);
+  return jst.getUTCFullYear();
+});
+const [month,setMonth]=useState(()=>{
+  const jst=new Date(Date.now()+9*60*60*1000);
+  return jst.getUTCMonth();
+});
   const [page,setPage]=useState("menu"); // menu | calendar | attendance
 
   const t=useCallback((ja,ko)=>lang==="ja"?ja:ko,[lang]);
@@ -681,7 +687,7 @@ function EmployeeView({lang,t,currentUser,employees,requests,year,month,prevMont
       {showChgPw&&<ChangePwModal t={t} user={currentUser}
         onSave={onChangePassword} onClose={()=>setShowChgPw(false)}/>}
     </div>
-  );
+退勤  );
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -1639,9 +1645,10 @@ function AttendanceTab({ lang, t, employees }) {
   }, []);
 
   function getWPName(wpId) {
-    const wp = workplaces.find(w => w.id === wpId);
-    return wp ? wp.name : "-";
-  }
+  if (!wpId) return "-";
+  const wp = workplaces.find(w => String(w.id) === String(wpId));
+  return wp ? wp.name : `ID:${wpId}`;
+}
   const [viewMode, setViewMode] = useState("date");
   const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [selectedEmpId, setSelectedEmpId] = useState("");

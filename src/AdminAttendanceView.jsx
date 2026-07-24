@@ -48,6 +48,12 @@ function mapLink(lat, lng) {
   return `https://www.google.com/maps?q=${lat},${lng}`;
 }
 
+// 기기의 시간대 설정과 무관하게, 항상 일본시간(JST) 기준으로 "오늘 날짜"를 계산
+function getJSTDateStr(d = new Date()) {
+  const jstMs = d.getTime() + 9 * 60 * 60 * 1000;
+  return new Date(jstMs).toISOString().slice(0, 10);
+}
+
 function nextMonthStart(ym) {
   const [y, m] = ym.split("-").map(Number);
   const ny = m === 12 ? y + 1 : y;
@@ -63,9 +69,9 @@ const STATUS_META = {
 
 export default function AdminAttendanceView({ lang, t, employees }) {
   const [mode, setMode] = useState("date");
-  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [date, setDate] = useState(() => getJSTDateStr());
   const [empId, setEmpId] = useState(employees[0]?.id || "");
-  const [ym, setYm] = useState(() => new Date().toISOString().slice(0, 7));
+  const [ym, setYm] = useState(() => getJSTDateStr().slice(0, 7));
   const [records, setRecords] = useState([]);
   const [workplaces, setWorkplaces] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -208,7 +214,7 @@ export default function AdminAttendanceView({ lang, t, employees }) {
                 <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                   <span style={{ fontWeight: 700, fontSize: 14 }}>{empName(rec)}</span>
                   {mode === "employee" && <span style={{ fontSize: 12, color: "#6b7280" }}>{rec.work_date}</span>}
-                  <span style={{ fontSize: 12, color: "#6b7280" }}>{rec.workplaces?.name || "-"}</span>
+                  <span style={{ fontSize: 12, color: "#6b7280" }}>{rec.workplaces?.name || (rec.workplace_id ? `ID:${rec.workplace_id}` : "-")}</span>
                   <span style={{ ...S.pill, background: st.bg, color: st.tc }}>{lang === "ja" ? st.ja : st.ko}</span>
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -358,7 +364,7 @@ function EditModal({ t, lang, rec, workplaces, onClose, onSaved }) {
 
 // ── 수동으로 새 기록 추가 모달 ──────────────────────────────
 function AddModal({ t, lang, employees, workplaces, defaultDate, defaultEmpId, onClose, onSaved }) {
-  const initDate = defaultDate || new Date().toISOString().slice(0, 10);
+  const initDate = defaultDate || getJSTDateStr();
   const [empId, setEmpId] = useState(defaultEmpId || employees[0]?.id || "");
   const [workDate, setWorkDate] = useState(initDate);
   const [workplaceId, setWorkplaceId] = useState(workplaces[0]?.id || "");
