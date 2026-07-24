@@ -687,7 +687,7 @@ function EmployeeView({lang,t,currentUser,employees,requests,year,month,prevMont
       {showChgPw&&<ChangePwModal t={t} user={currentUser}
         onSave={onChangePassword} onClose={()=>setShowChgPw(false)}/>}
     </div>
-退勤  );
+ );
 }
 
 // ══════════════════════════════════════════════════════════════════
