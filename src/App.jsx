@@ -1639,9 +1639,22 @@ function AttendanceTab({ lang, t, employees }) {
   const [workplaces, setWorkplaces] = useState([]);
 
   useEffect(() => {
-    sbFetch("workplaces?is_active=eq.true&select=*").then(data => {
-      if (Array.isArray(data)) setWorkplaces(data);
-    });
+    let cancelled = false;
+    async function loadWorkplaces(attemptsLeft = 4) {
+      try {
+        const data = await sbFetch("workplaces?is_active=eq.true&select=*");
+        if (!cancelled && Array.isArray(data)) setWorkplaces(data);
+      } catch (e) {
+        if (cancelled) return;
+        if (attemptsLeft > 1) {
+          setTimeout(() => loadWorkplaces(attemptsLeft - 1), 800);
+        } else {
+          console.error("勤務地の読み込みに失敗しました:", e);
+        }
+      }
+    }
+    loadWorkplaces();
+    return () => { cancelled = true; };
   }, []);
 
   function getWPName(wpId) {
@@ -1658,6 +1671,11 @@ function AttendanceTab({ lang, t, employees }) {
   });
   const [records, setRecords] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [editRec, setEditRec] = useState(null);
+  const [editClockIn, setEditClockIn] = useState("");
+  const [editClockOut, setEditClockOut] = useState("");
+  const [editSaving, setEditSaving] = useState(false);
+  const [editError, setEditError] = useState("");
 
   const empOnly = employees.filter(e => e.role === "employee");
 
@@ -1708,6 +1726,48 @@ function AttendanceTab({ lang, t, employees }) {
     const emp = employees.find(e => e.id === empId);
     if (!emp) return "-";
     return lang === "ja" ? emp.name : emp.name_ko;
+  }
+
+  // datetime-local input <-> ISO 문자열 변환 (JST 기준 그대로 표시)
+  function toLocalInput(iso) {
+    if (!iso) return "";
+    const d = new Date(iso);
+    const pad = n => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }
+  function fromLocalInput(local) {
+    if (!local) return null;
+    return new Date(local).toISOString();
+  }
+
+  function openEdit(rec) {
+    setEditRec(rec);
+    setEditClockIn(toLocalInput(rec.clock_in));
+    setEditClockOut(toLocalInput(rec.clock_out));
+    setEditError("");
+  }
+
+  async function saveEdit() {
+    if (!editRec) return;
+    setEditSaving(true);
+    setEditError("");
+    try {
+      const newClockIn = fromLocalInput(editClockIn);
+      const newClockOut = fromLocalInput(editClockOut);
+      await sbFetch(`/attendance_records?id=eq.${editRec.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          clock_in: newClockIn,
+          clock_out: newClockOut,
+          status: newClockOut ? "done" : "working",
+        }),
+      });
+      setEditRec(null);
+      fetchRecords();
+    } catch (e) {
+      setEditError(String(e.message || e));
+    }
+    setEditSaving(false);
   }
 
   function downloadExcel() {
@@ -1804,6 +1864,7 @@ function AttendanceTab({ lang, t, employees }) {
                 <th style={thS}>{t("勤務時間","근무시간")}</th>
                 <th style={thS}>{t("勤務地","근무지")}</th>
                 <th style={thS}>{t("状態","상태")}</th>
+                <th style={thS}></th>
               </tr>
             </thead>
             <tbody>
@@ -1819,6 +1880,12 @@ function AttendanceTab({ lang, t, employees }) {
                       {r.status === "working" ? t("出勤中","출근중") : t("退勤済","퇴근완료")}
                     </span>
                   </td>
+                  <td style={tdS}>
+                    <button onClick={() => openEdit(r)}
+                      style={{ background: "#eef2ff", color: "#3730a3", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 12, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}>
+                      ✏️ {t("修正","수정")}
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -1830,6 +1897,40 @@ function AttendanceTab({ lang, t, employees }) {
               </span>
             </div>
           )}
+        </div>
+      )}
+
+      {editRec && (
+        <div style={S.overlay} onClick={() => !editSaving && setEditRec(null)}>
+          <div style={{ ...S.modalBox, maxWidth: 380 }} onClick={e => e.stopPropagation()}>
+            <h3 style={S.modalTitle}>✏️ {t("記録を修正","기록 수정")}</h3>
+            <div style={{ background: "#f8fafc", borderRadius: 10, padding: "10px 14px", marginBottom: 16, fontSize: 13, color: "#374151" }}>
+              <div style={{ fontWeight: 700, marginBottom: 2 }}>{getEmpName(editRec.employee_id)}</div>
+              <div style={{ color: "#9ca3af" }}>{editRec.work_date} · {getWPName(editRec.workplace_id)}</div>
+            </div>
+            <div style={S.fg}>
+              <label style={S.fl}>{t("出勤時刻","출근시각")}</label>
+              <input type="datetime-local" style={S.input} value={editClockIn}
+                onChange={e => setEditClockIn(e.target.value)} />
+            </div>
+            <div style={S.fg}>
+              <label style={S.fl}>{t("退勤時刻","퇴근시각")}</label>
+              <input type="datetime-local" style={S.input} value={editClockOut}
+                onChange={e => setEditClockOut(e.target.value)} />
+              <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 4 }}>
+                {t("空欄にすると「未退勤」になります","비워두면 '미퇴근' 상태가 됩니다")}
+              </div>
+            </div>
+            {editError && <div style={{ color: "#ef4444", fontSize: 12, marginBottom: 8 }}>⚠ {editError}</div>}
+            <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+              <button style={S.primaryBtn} disabled={editSaving} onClick={saveEdit}>
+                {editSaving ? t("保存中...","저장 중...") : t("保存","저장")}
+              </button>
+              <button style={S.closeBtn} disabled={editSaving} onClick={() => setEditRec(null)}>
+                {t("キャンセル","취소")}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
