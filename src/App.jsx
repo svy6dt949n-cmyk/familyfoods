@@ -1642,7 +1642,7 @@ function AttendanceTab({ lang, t, employees }) {
     let cancelled = false;
     async function loadWorkplaces(attemptsLeft = 4) {
       try {
-        const data = await sbFetch("workplaces?is_active=eq.true&select=*");
+        const data = await sbFetch("/workplaces?is_active=eq.true&select=*");
         if (!cancelled && Array.isArray(data)) setWorkplaces(data);
       } catch (e) {
         if (cancelled) return;
