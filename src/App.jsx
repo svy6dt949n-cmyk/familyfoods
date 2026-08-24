@@ -1609,11 +1609,15 @@ function CalGrid({year,month,daysInMonth,firstDay,dayLabels,renderDay}){
   const cells=[];
   for(let i=0;i<firstDay;i++) cells.push(<div key={`e${i}`}/>);
   for(let d=1;d<=daysInMonth;d++) cells.push(renderDay(fmt(year,month,d),d));
-  return (<div style={S.calGrid}>
-    {dayLabels.map((l,i)=><div key={l} style={{...S.dayHdr,
-      ...(i===0?{color:"#ef4444"}:i===6?{color:"#3b82f6"}:{})}}>{l}</div>)}
-    {cells}
-  </div>);
+  return (
+    <div style={{overflowX:"auto",WebkitOverflowScrolling:"touch"}}>
+      <div style={{...S.calGrid,minWidth:640}}>
+        {dayLabels.map((l,i)=><div key={l} style={{...S.dayHdr,
+          ...(i===0?{color:"#ef4444"}:i===6?{color:"#3b82f6"}:{})}}>{l}</div>)}
+        {cells}
+      </div>
+    </div>
+  );
 }
 function LangToggle({lang,setLang}){
   return (<div style={S.langSwitch}>
@@ -2051,4 +2055,5 @@ const S={
   code:{fontSize:11,background:"#e2e8f0",padding:"1px 6px",borderRadius:4,fontFamily:"monospace"},
   empty:{color:"#9ca3af",textAlign:"center",padding:"20px 0",fontSize:13},
 };
+
 
