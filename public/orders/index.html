@@ -187,7 +187,7 @@
   <div class="wrap">
     <div>
       <h1>FamilyFoods 納品書システム</h1>
-      <div class="sub" id="who">販売管理 · 四季の旅ほか取引先 · v1024-1432</div>
+      <div class="sub" id="who">販売管理 · 四季の旅ほか取引先 · v1024-1520</div>
     </div>
     <div class="no-print" id="topActions" hidden>
       <button class="btn btn-ghost" onclick="App.logout()">ログアウト</button>
@@ -255,6 +255,7 @@
       <button id="tab-collect" class="btn" onclick="App.showTab('collect')">集金</button>
       <button id="tab-pay" class="btn" onclick="App.showTab('pay')">入金</button>
       <button id="tab-products" class="btn" onclick="App.showTab('products')">商品マスター</button>
+      <button id="tab-staff" class="btn" onclick="App.showTab('staff')" hidden>担当者管理</button>
     </div>
 
     <!-- CUSTOMERS -->
@@ -272,7 +273,7 @@
         <div class="row" style="margin-top:14px;">
           <div class="field"><label>コード</label><input id="newCustCode" placeholder="例: H35"></div>
           <div class="field" style="flex:2;"><label>取引先名</label><input id="newCustName" placeholder="取引先の正式名称"></div>
-          <div class="field"><label>担当者</label><input id="newCustStaff" placeholder="任意"></div>
+          <div class="field"><label>担当者</label><input id="newCustStaff" list="staffNames" placeholder="任意"></div>
           <div class="field"><label>決済</label>
             <select id="newCustPay"><option value="credit">掛け（月末請求）</option><option value="cash">現金</option></select></div>
           <div class="field" style="flex:0 0 auto;align-self:flex-end;">
@@ -294,7 +295,7 @@
           <div class="field"><label>決済（この取引先）</label>
             <select id="orderPay" onchange="App.updateCustomerPayment(this.value)">
               <option value="credit">掛け（月末請求）</option><option value="cash">現金</option></select></div>
-          <div class="field"><label>担当者（この取引先）</label><input id="orderStaff" placeholder="担当者名を入力 → Enterで保存" onkeydown="if(event.key==='Enter')this.blur();" onchange="App.updateCustomerStaff(this.value)"></div>
+          <div class="field"><label>担当者（この取引先）</label><input id="orderStaff" list="staffNames" placeholder="担当者名を入力 → Enterで保存" onkeydown="if(event.key==='Enter')this.blur();" onchange="App.updateCustomerStaff(this.value)"></div>
           <div class="field"><label>受注日</label><input id="orderDate" type="date"></div>
           <div class="field"><label>納品日</label><input id="deliveryDate" type="date"></div>
         </div>
@@ -541,6 +542,33 @@
       </div>
     </div>
 
+    <!-- STAFF (owner only) -->
+    <div id="view-staff" hidden>
+      <div class="card">
+        <h2>担当者管理</h2>
+        <div class="hint" style="margin-bottom:10px;">ここに登録した担当者だけがログインして使えます。役割によって見られる画面が変わります。</div>
+        <div class="tbl-wrap"><table>
+          <thead><tr><th style="min-width:120px;">氏名</th><th style="min-width:200px;">メールアドレス（ログインID）</th><th style="width:130px;">役割</th><th style="width:70px;">状態</th><th style="width:210px;"></th></tr></thead>
+          <tbody id="staffBody"></tbody></table></div>
+      </div>
+      <div class="card">
+        <h2 style="font-size:15px;">担当者を追加</h2>
+        <div class="row">
+          <div class="field"><label>氏名</label><input id="stName" placeholder="例: 田中"></div>
+          <div class="field" style="flex:2;"><label>メールアドレス（ログインID）</label><input id="stEmail" type="email" autocomplete="off" placeholder="例: tanaka@example.com"></div>
+          <div class="field"><label>役割</label><select id="stRole"></select></div>
+          <div class="field"><label>初期パスワード（8文字以上）</label><input id="stPw" type="text" autocomplete="off" placeholder="本人に伝えてください"></div>
+          <div class="field" style="flex:0 0 auto;align-self:flex-end;"><button class="btn btn-accent" onclick="App.staffCreate()">登録</button></div>
+        </div>
+        <div id="staffMsg" class="hint" style="margin-top:4px;"></div>
+        <div class="hint" style="margin-top:12px;line-height:1.8;">
+          <b>役割と見られる画面</b><br>
+          社長：すべて＋担当者管理 ／ 事務：取引先・注文・履歴・納品書・検索・出荷リスト・請求書・集金・入金・商品マスター<br>
+          営業：取引先・注文・履歴・納品書・検索・集金 ／ 仕入：検索・出荷リスト・商品マスター ／ 経理：履歴・納品書・検索・請求書・入金
+        </div>
+      </div>
+    </div>
+
     <div id="view-products" hidden>
       <div class="card">
         <h2>商品マスター</h2>
@@ -601,6 +629,7 @@
 
   </div>
 
+  <datalist id="staffNames"></datalist>
   <datalist id="unitOptions">
     <option value="個"></option>
     <option value="kg"></option>
@@ -932,8 +961,19 @@ const App = {
     document.getElementById('view-login').hidden = true;
     document.getElementById('view-main').hidden = false;
     document.getElementById('topActions').hidden = false;
+    const mr = await this.loadMe();
+    if(!mr.ok){
+      await sb.auth.signOut();
+      document.getElementById('view-main').hidden = true;
+      document.getElementById('topActions').hidden = true;
+      document.getElementById('view-login').hidden = false;
+      document.getElementById('loginError').textContent = mr.msg;
+      return;
+    }
+    this.applyRole();
     await this.loadMasterData();
-    this.showTab('customers');
+    this.fillStaffNames();
+    this.showTab(this.defaultTab());
     this.restoreDraft();
     if(!this._draftTimer) this._draftTimer = setInterval(()=>this.saveDraft(), 1500);
   },
@@ -971,20 +1011,134 @@ const App = {
     const who = document.getElementById('who');
     let loginEmail = '';
     try{ const u = await sb.auth.getUser(); loginEmail = (u.data && u.data.user && u.data.user.email) || ''; }catch(e){}
-    if(who) who.textContent = who.textContent.replace(/ · 取引先\d+\/商品\d+( · ログイン: .*)?$/,'') + ` · 取引先${this.customers.length}/商品${this.products.length}` + (loginEmail ? ` · ログイン: ${loginEmail}` : '');
+    if(who) who.textContent = who.textContent.replace(/ · 取引先\d+\/商品\d+( · ログイン: .*)?$/,'') + ` · 取引先${this.customers.length}/商品${this.products.length}` + (loginEmail ? ` · ログイン: ${(this.me && !this.me.legacy) ? this.me.name+'（'+this.ROLE_LABEL[this.me.role]+'）・' : ''}${loginEmail}` : '');
     this.renderCustomerList();
   },
 
   _curTab: 'customers', _backTab: 'customers',
+  // ---------- staff / roles ----------
+  ROLE_LABEL: { owner:'社長', office:'事務', sales:'営業', purchaser:'仕入', accounting:'経理' },
+  ROLE_TABS: {
+    owner:['customers','order','history','invoice','search','ship','bill','collect','pay','products','staff'],
+    office:['customers','order','history','invoice','search','ship','bill','collect','pay','products'],
+    sales:['customers','order','history','invoice','search','collect'],
+    purchaser:['search','ship','products'],
+    accounting:['history','invoice','search','bill','pay']
+  },
+  ROLE_DEFAULT: { owner:'customers', office:'customers', sales:'customers', purchaser:'ship', accounting:'history' },
+  ALL_TABS: ['customers','order','history','invoice','search','ship','bill','collect','pay','products','staff'],
+  me: null, staffList: [],
+  canTab(t){ return !this.me || (this.ROLE_TABS[this.me.role]||[]).includes(t); },
+  defaultTab(){ return this.me ? (this.ROLE_DEFAULT[this.me.role]||'customers') : 'customers'; },
+  applyRole(){
+    this.ALL_TABS.forEach(t=>{ const b = document.getElementById('tab-'+t); if(b) b.hidden = !this.canTab(t); });
+  },
+  async loadMe(){
+    let user = null;
+    try{ const u = await sb.auth.getUser(); user = u.data && u.data.user; }catch(e){}
+    if(!user) return { ok:false, msg:'ログイン情報を取得できませんでした。もう一度ログインしてください。' };
+    const { data, error } = await sb.from('sales_staff').select('*').order('created_at');
+    if(error){
+      const missing = error.code==='42P01' || error.code==='PGRST205' || /sales_staff.*(does not exist|schema cache)|relation .*sales_staff/i.test(error.message||'');
+      if(missing){ this.staffList = []; this.me = { name:user.email, role:'owner', email:user.email, legacy:true }; return { ok:true }; }
+      return { ok:false, msg:'担当者情報を読み込めませんでした: ' + (error.message||'') };
+    }
+    this.staffList = data || [];
+    const em = (user.email||'').toLowerCase();
+    const row = this.staffList.find(x=>x.user_id===user.id || (x.email||'').toLowerCase()===em);
+    if(!row) return { ok:false, msg:'このアカウントは担当者として登録されていません。管理者に登録を依頼してください。' };
+    if(!row.active) return { ok:false, msg:'このアカウントは無効になっています。管理者に連絡してください。' };
+    this.me = { name:row.name, role:row.role, email:user.email };
+    return { ok:true };
+  },
+  activeStaffNames(){ return (this.staffList||[]).filter(x=>x.active).map(x=>x.name); },
+  fillStaffNames(){
+    const names = [...new Set([...this.activeStaffNames(), ...this.customers.map(c=>(c.staff||'').trim()).filter(Boolean)])].sort((a,b)=>a.localeCompare(b,'ja'));
+    const dl = document.getElementById('staffNames');
+    if(dl) dl.innerHTML = names.map(n=>`<option value="${escapeHtml(n)}"></option>`).join('');
+  },
+  async openStaff(){
+    document.getElementById('stRole').innerHTML = Object.keys(this.ROLE_LABEL).map(r=>`<option value="${r}">${this.ROLE_LABEL[r]}</option>`).join('');
+    document.getElementById('stRole').value = 'sales';
+    await this.reloadStaff();
+  },
+  async reloadStaff(){
+    const { data, error } = await sb.from('sales_staff').select('*').order('created_at');
+    if(!error) this.staffList = data || [];
+    this.renderStaff();
+    this.fillStaffNames();
+    const msg = document.getElementById('staffMsg');
+    if(this.me && this.me.legacy) msg.textContent = '※ 担当者テーブルがまだ作成されていません（現在は全員が社長と同じ権限です）。';
+  },
+  renderStaff(){
+    const body = document.getElementById('staffBody');
+    if(!this.staffList.length){ body.innerHTML = '<tr><td colspan="5" class="empty">担当者が登録されていません。</td></tr>'; return; }
+    const meEmail = ((this.me&&this.me.email)||'').toLowerCase();
+    body.innerHTML = this.staffList.map(x=>{
+      const self = (x.email||'').toLowerCase()===meEmail;
+      const opts = Object.keys(this.ROLE_LABEL).map(r=>`<option value="${r}" ${x.role===r?'selected':''}>${this.ROLE_LABEL[r]}</option>`).join('');
+      return `<tr style="${x.active?'':'opacity:.5;'}">
+        <td><b>${escapeHtml(x.name)}</b>${self?' <span class="pill pill-first">自分</span>':''}</td>
+        <td>${escapeHtml(x.email)}</td>
+        <td><select onchange="App.staffSetRole('${x.id}',this.value)" ${self?'disabled':''}>${opts}</select></td>
+        <td>${x.active?'<span class="pill pill-8">有効</span>':'<span class="pill pill-cash">無効</span>'}</td>
+        <td style="white-space:nowrap;">
+          <button class="btn btn-sm" onclick="App.staffResetPw('${x.id}')">パスワード再設定</button>
+          ${self?'':`<button class="btn btn-sm ${x.active?'btn-danger':''}" onclick="App.staffToggle('${x.id}',${x.active?'false':'true'})">${x.active?'無効にする':'有効に戻す'}</button>`}
+        </td></tr>`;
+    }).join('');
+  },
+  async staffCall(body, okMsg){
+    const msg = document.getElementById('staffMsg');
+    msg.style.color = ''; msg.textContent = '処理中…';
+    const { data, error } = await sb.functions.invoke('manage-staff', { body });
+    let detail = (data && data.error) || '';
+    if(error && !detail){
+      try{ if(error.context && error.context.json){ const j = await error.context.json(); detail = (j && j.error) || ''; } }catch(e){}
+      if(!detail) detail = error.message || 'エラーが発生しました。';
+    }
+    if(detail){ msg.style.color = 'var(--danger)'; msg.textContent = '失敗: ' + detail; return false; }
+    msg.textContent = okMsg || '完了しました。';
+    await this.reloadStaff();
+    msg.textContent = okMsg || '完了しました。';
+    return true;
+  },
+  async staffCreate(){
+    const name = document.getElementById('stName').value.trim();
+    const email = document.getElementById('stEmail').value.trim();
+    const role = document.getElementById('stRole').value;
+    const password = document.getElementById('stPw').value;
+    const msg = document.getElementById('staffMsg');
+    if(!name || !email || !password){ msg.style.color='var(--danger)'; msg.textContent='氏名・メールアドレス・初期パスワードを入力してください。'; return; }
+    if(password.length<8){ msg.style.color='var(--danger)'; msg.textContent='パスワードは8文字以上にしてください。'; return; }
+    const ok = await this.staffCall({ action:'create', name, email, role, password }, `${name} さんを登録しました。メールアドレスと初期パスワードを本人に伝えてください。`);
+    if(ok){ ['stName','stEmail','stPw'].forEach(i=>document.getElementById(i).value=''); }
+  },
+  async staffSetRole(id, role){ await this.staffCall({ action:'set_role', id, role }, '役割を変更しました。'); },
+  async staffToggle(id, active){
+    const x = this.staffList.find(s=>s.id===id); if(!x) return;
+    if(!active && !confirm(x.name+' さんを無効にします（ログインできなくなります）。よろしいですか？')) return;
+    await this.staffCall({ action:'set_active', id, active }, active ? '有効に戻しました。' : '無効にしました。');
+  },
+  async staffResetPw(id){
+    const x = this.staffList.find(s=>s.id===id); if(!x) return;
+    const pw = prompt(x.name+' さんの新しいパスワード（8文字以上）');
+    if(pw==null) return;
+    if(pw.length<8){ toast('パスワードは8文字以上にしてください。'); return; }
+    await this.staffCall({ action:'reset_password', id, password:pw }, 'パスワードを再設定しました。本人に伝えてください。');
+  },
+
   goBack(){ this.showTab(this._backTab || 'customers'); },
   showTab(tab){
+    if(!this.canTab(tab)) tab = this.defaultTab();
     if(tab==='invoice' && this._curTab!=='invoice') this._backTab = this._curTab;
     this._curTab = tab;
-    ['customers','order','history','invoice','search','ship','bill','collect','pay','products'].forEach(t=>{
+    ['customers','order','history','invoice','search','ship','bill','collect','pay','products','staff'].forEach(t=>{
       document.getElementById('view-'+t).hidden = (t!==tab);
       document.getElementById('tab-'+t).classList.toggle('active', t===tab);
     });
     if(tab==='history') this.loadHistory();
+    if(tab==='staff') this.openStaff();
     if(tab==='products') this.renderProductMaster();
     if(tab==='search') this.loadSalesData(false);
     if(tab==='bill'){
@@ -2458,7 +2612,7 @@ const App = {
   async openCollect(){
     const d = document.getElementById('kcDate'); if(!d.value) d.value = todayStr();
     document.getElementById('payCustList').innerHTML = this.customers.map(c=>`<option value="${escapeHtml(c.name)}">${escapeHtml(c.code||'')}</option>`).join('');
-    const staffs = [...new Set(this.customers.map(c=>(c.staff||'').trim()).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'ja'));
+    const staffs = [...new Set([...this.activeStaffNames(), ...this.customers.map(c=>(c.staff||'').trim()).filter(Boolean)])].sort((a,b)=>a.localeCompare(b,'ja'));
     const sel = document.getElementById('kcStaff'), cur = sel.value;
     sel.innerHTML = '<option value="">全員</option>' + staffs.map(n=>`<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join('');
     if(cur && staffs.includes(cur)) sel.value = cur;
@@ -2471,7 +2625,7 @@ const App = {
     const sel = document.getElementById('kcCollector'), cur = sel.value;
     const act = this.payMethods.filter(m=>m.active);
     const names = new Set(act.map(m=>m.name));
-    const staffs = [...new Set(this.customers.map(c=>(c.staff||'').trim()).filter(Boolean))].filter(n=>!names.has(n));
+    const staffs = [...new Set([...this.activeStaffNames(), ...this.customers.map(c=>(c.staff||'').trim()).filter(Boolean)])].filter(n=>!names.has(n));
     sel.innerHTML = act.map(m=>`<option value="${m.id}">${escapeHtml(m.name)}（${this.KIND_LABEL[m.kind]||''}）</option>`).join('')
       + staffs.map(n=>`<option value="new:${escapeHtml(n)}">${escapeHtml(n)}（担当者・新規）</option>`).join('');
     if(cur && [...sel.options].some(o=>o.value===cur)) sel.value = cur;
